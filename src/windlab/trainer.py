@@ -171,12 +171,11 @@ class Trainer:
         model_class = cast(type[nn.Module], MODELS.get(self.config.model.name))
         model = model_class(
             input_size=windowed.train.inputs.shape[2] * windowed.train.inputs.shape[3],
-            hidden_size=self.config.model.hidden_size,
-            num_layers=self.config.model.num_layers,
-            dropout=self.config.model.dropout,
+            input_steps=windowed.train.inputs.shape[1],
             forecast_steps=self.config.data.forecast_steps,
             airport_count=len(self.config.data.airports),
             target_size=len(self.config.data.target_variables),
+            **self.config.model.parameters,
         )
         if not isinstance(model, nn.Module):
             raise TypeError("Registered model must be a torch.nn.Module.")

@@ -15,6 +15,9 @@ Future support for `series_15min`, `EC`, additional models, and richer metrics
 must extend the existing interfaces instead of adding copied entry points or
 experiment-specific trainers.
 
+Implemented model backbones and their project adaptations are documented in
+`docs/models.md`.
+
 ## Repository structure
 
 ```text
@@ -131,6 +134,7 @@ Each successful training run saves:
 - `training_log.json`
 - `metrics.json`
 - `normalization.npz`
+- `figures/test_predictions_lead_{1,6,12,24}_{full,first_300}.png`
 
 Evaluation reuses the saved configuration, checkpoint, and normalization state
 from the run directory.

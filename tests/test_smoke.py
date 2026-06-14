@@ -36,8 +36,16 @@ normalization:
 model:
   name: gru
   hidden_size: 8
+  num_layers: 1
+  dropout: 0.0
 trainer:
-  ridge_lambda: 0.001
+  device: cpu
+  batch_size: 4
+  epochs: 2
+  patience: 2
+  learning_rate: 0.001
+  weight_decay: 0.0
+  min_delta: 0.0
 evaluation:
   metrics: [mae, rmse, bias]
   real_observation_only: true

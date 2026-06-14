@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Configuration-driven airport wind-speed forecasting framework"
 requires-python = ">=3.12"
 dependencies = [
+  "matplotlib>=3.8",
   "numpy>=1.26",
   "PyYAML>=6.0",
   "torch>=2.0",

@@ -25,6 +25,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     metrics = evaluate_run_dir(args.run_dir)
+    for figure_path in metrics.get("figure_paths", []):
+        print(figure_path, file=sys.stderr)
     print(json.dumps(metrics, sort_keys=True))
     return 0
 

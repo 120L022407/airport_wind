@@ -17,6 +17,7 @@ from windlab.data.series import PreparedSeriesData, PreparedSeriesSplit
 from windlab.data.torch_dataset import WindowedTorchDataset
 from windlab.data.windows import WindowedData, WindowedSplit, build_windowed_data
 from windlab.metrics import compute_metrics
+from windlab.reporting import save_test_prediction_figures
 from windlab.registry import DATA_BUILDERS, MODELS
 from windlab.utils import dump_json
 
@@ -128,6 +129,17 @@ class Evaluator:
             ),
             "real_observation_only": config.evaluation.real_observation_only,
             "metrics": list(config.evaluation.metrics),
+            "figure_paths": [
+                str(path)
+                for path in save_test_prediction_figures(
+                    predictions=test_prediction.astype(np.float64, copy=False),
+                    targets=windowed.test.targets,
+                    target_timestamps=windowed.test.target_time_index,
+                    output_dir=self.run_dir / "figures",
+                    airport_labels=windowed.test.airport_ids,
+                    target_name=windowed.test.target_feature_names[0],
+                )
+            ],
         }
 
     def _predict_numpy(

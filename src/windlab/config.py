@@ -13,6 +13,7 @@ import yaml
 SUPPORTED_SOURCES = {"series", "series_15min", "EC"}
 SUPPORTED_NORMALIZATION_METHODS = {"zscore"}
 SUPPORTED_FIT_SPLITS = {"train"}
+SUPPORTED_MODELS = {"gru", "patchtst", "itransformer", "dlinear"}
 
 _ENV_PATTERN = re.compile(r"\$\{([A-Z0-9_]+)(?::-(.+?))?\}")
 
@@ -55,9 +56,7 @@ class NormalizationSection:
 @dataclass(frozen=True)
 class ModelSection:
     name: str
-    hidden_size: int
-    num_layers: int
-    dropout: float
+    parameters: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -207,6 +206,138 @@ def _validate_normalization_section(raw: dict[str, Any]) -> NormalizationSection
     )
 
 
+def _require_model_positive_int(raw: dict[str, Any], field_name: str) -> int:
+    return _require_positive_int(raw.get(field_name), f"model.{field_name}")
+
+
+def _require_model_float_range(
+    raw: dict[str, Any],
+    field_name: str,
+    *,
+    minimum: float,
+    maximum: float,
+) -> float:
+    value = raw.get(field_name)
+    if not isinstance(value, (int, float)) or not minimum <= float(value) < maximum:
+        raise ConfigError(f"model.{field_name} must be in [{minimum}, {maximum}).")
+    return float(value)
+
+
+def _reject_unknown_model_fields(
+    raw: dict[str, Any],
+    allowed_fields: set[str],
+    model_name: str,
+) -> None:
+    unknown_fields = sorted(set(raw) - allowed_fields)
+    if unknown_fields:
+        raise ConfigError(
+            f"model {model_name!r} does not support fields: "
+            + ", ".join(unknown_fields)
+        )
+
+
+def _validate_transformer_heads(d_model: int, n_heads: int) -> None:
+    if d_model % n_heads != 0:
+        raise ConfigError("model.d_model must be divisible by model.n_heads.")
+
+
+def _validate_model_section(raw: dict[str, Any]) -> ModelSection:
+    model_name = raw.get("name")
+    if not isinstance(model_name, str) or not model_name:
+        raise ConfigError("model.name must be a non-empty string.")
+    if model_name not in SUPPORTED_MODELS:
+        raise ConfigError(f"model.name must be one of {sorted(SUPPORTED_MODELS)}.")
+
+    transformer_fields = {
+        "name",
+        "d_model",
+        "num_layers",
+        "n_heads",
+        "ff_dim",
+        "dropout",
+    }
+    if model_name == "gru":
+        _reject_unknown_model_fields(
+            raw,
+            {"name", "hidden_size", "num_layers", "dropout"},
+            model_name,
+        )
+        return ModelSection(
+            name=model_name,
+            parameters={
+                "hidden_size": _require_model_positive_int(raw, "hidden_size"),
+                "num_layers": _require_model_positive_int(raw, "num_layers"),
+                "dropout": _require_model_float_range(
+                    raw,
+                    "dropout",
+                    minimum=0.0,
+                    maximum=1.0,
+                ),
+            },
+        )
+    if model_name == "patchtst":
+        _reject_unknown_model_fields(
+            raw,
+            transformer_fields | {"patch_len", "stride"},
+            model_name,
+        )
+        d_model = _require_model_positive_int(raw, "d_model")
+        n_heads = _require_model_positive_int(raw, "n_heads")
+        _validate_transformer_heads(d_model, n_heads)
+        return ModelSection(
+            name=model_name,
+            parameters={
+                "d_model": d_model,
+                "num_layers": _require_model_positive_int(raw, "num_layers"),
+                "n_heads": n_heads,
+                "ff_dim": _require_model_positive_int(raw, "ff_dim"),
+                "dropout": _require_model_float_range(
+                    raw,
+                    "dropout",
+                    minimum=0.0,
+                    maximum=1.0,
+                ),
+                "patch_len": _require_model_positive_int(raw, "patch_len"),
+                "stride": _require_model_positive_int(raw, "stride"),
+            },
+        )
+    if model_name == "itransformer":
+        _reject_unknown_model_fields(raw, transformer_fields, model_name)
+        d_model = _require_model_positive_int(raw, "d_model")
+        n_heads = _require_model_positive_int(raw, "n_heads")
+        _validate_transformer_heads(d_model, n_heads)
+        return ModelSection(
+            name=model_name,
+            parameters={
+                "d_model": d_model,
+                "num_layers": _require_model_positive_int(raw, "num_layers"),
+                "n_heads": n_heads,
+                "ff_dim": _require_model_positive_int(raw, "ff_dim"),
+                "dropout": _require_model_float_range(
+                    raw,
+                    "dropout",
+                    minimum=0.0,
+                    maximum=1.0,
+                ),
+            },
+        )
+
+    _reject_unknown_model_fields(raw, {"name", "moving_avg", "individual"}, model_name)
+    individual = raw.get("individual")
+    if not isinstance(individual, bool):
+        raise ConfigError("model.individual must be a boolean.")
+    moving_avg = _require_model_positive_int(raw, "moving_avg")
+    if moving_avg % 2 == 0:
+        raise ConfigError("model.moving_avg must be a positive odd integer.")
+    return ModelSection(
+        name=model_name,
+        parameters={
+            "moving_avg": moving_avg,
+            "individual": individual,
+        },
+    )
+
+
 def load_config(config_path: str | Path) -> ExperimentConfig:
     """Load and validate one experiment config."""
 
@@ -237,18 +368,14 @@ def load_config(config_path: str | Path) -> ExperimentConfig:
     if not isinstance(output_root, str) or not output_root:
         raise ConfigError("runtime.output_root must be a non-empty string.")
 
-    model_name = model_raw.get("name")
-    hidden_size = model_raw.get("hidden_size")
-    num_layers = model_raw.get("num_layers")
-    dropout = model_raw.get("dropout")
-    if not isinstance(model_name, str) or not model_name:
-        raise ConfigError("model.name must be a non-empty string.")
-    if not isinstance(hidden_size, int) or hidden_size <= 0:
-        raise ConfigError("model.hidden_size must be a positive integer.")
-    if not isinstance(num_layers, int) or num_layers <= 0:
-        raise ConfigError("model.num_layers must be a positive integer.")
-    if not isinstance(dropout, (int, float)) or not 0.0 <= float(dropout) < 1.0:
-        raise ConfigError("model.dropout must be in [0.0, 1.0).")
+    data_section = _validate_data_section(data_raw)
+    normalization_section = _validate_normalization_section(normalization_raw)
+    model_section = _validate_model_section(model_raw)
+    if (
+        model_section.name == "patchtst"
+        and int(model_section.parameters["patch_len"]) > data_section.input_steps
+    ):
+        raise ConfigError("model.patch_len must be <= data.input_steps.")
 
     device = trainer_raw.get("device")
     if not isinstance(device, str) or not device:
@@ -274,14 +401,9 @@ def load_config(config_path: str | Path) -> ExperimentConfig:
     return ExperimentConfig(
         experiment=ExperimentSection(name=name, seed=seed),
         runtime=RuntimeSection(output_root=output_root),
-        data=_validate_data_section(data_raw),
-        normalization=_validate_normalization_section(normalization_raw),
-        model=ModelSection(
-            name=model_name,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-            dropout=float(dropout),
-        ),
+        data=data_section,
+        normalization=normalization_section,
+        model=model_section,
         trainer=TrainerSection(
             device=device,
             batch_size=batch_size,
