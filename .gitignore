@@ -29,3 +29,24 @@ logs/
 # Local configuration
 .env
 *.local.yaml
+.DS_Store
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.pyc
+*.pyo
+*.pyd
+
+.venv/
+venv/
+
+data/
+!data/README.md
+
+outputs/
+
+*.npy
+*.npz
+*.pt
+*.pkl

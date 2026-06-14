@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "airport-wind-lab"
+version = "0.1.0"
+description = "Configuration-driven airport wind-speed forecasting framework"
+requires-python = ">=3.12"
+dependencies = [
+  "numpy>=1.26",
+  "PyYAML>=6.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "src"
+files = ["src", "tests", "scripts"]
+strict = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = ["yaml"]
+ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "W"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
