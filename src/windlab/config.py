@@ -56,11 +56,19 @@ class NormalizationSection:
 class ModelSection:
     name: str
     hidden_size: int
+    num_layers: int
+    dropout: float
 
 
 @dataclass(frozen=True)
 class TrainerSection:
-    ridge_lambda: float
+    device: str
+    batch_size: int
+    epochs: int
+    patience: int
+    learning_rate: float
+    weight_decay: float
+    min_delta: float
 
 
 @dataclass(frozen=True)
@@ -231,14 +239,32 @@ def load_config(config_path: str | Path) -> ExperimentConfig:
 
     model_name = model_raw.get("name")
     hidden_size = model_raw.get("hidden_size")
+    num_layers = model_raw.get("num_layers")
+    dropout = model_raw.get("dropout")
     if not isinstance(model_name, str) or not model_name:
         raise ConfigError("model.name must be a non-empty string.")
     if not isinstance(hidden_size, int) or hidden_size <= 0:
         raise ConfigError("model.hidden_size must be a positive integer.")
+    if not isinstance(num_layers, int) or num_layers <= 0:
+        raise ConfigError("model.num_layers must be a positive integer.")
+    if not isinstance(dropout, (int, float)) or not 0.0 <= float(dropout) < 1.0:
+        raise ConfigError("model.dropout must be in [0.0, 1.0).")
 
-    ridge_lambda = trainer_raw.get("ridge_lambda")
-    if not isinstance(ridge_lambda, (int, float)) or float(ridge_lambda) < 0.0:
-        raise ConfigError("trainer.ridge_lambda must be a non-negative float.")
+    device = trainer_raw.get("device")
+    if not isinstance(device, str) or not device:
+        raise ConfigError("trainer.device must be a non-empty string.")
+    batch_size = _require_positive_int(trainer_raw.get("batch_size"), "trainer.batch_size")
+    epochs = _require_positive_int(trainer_raw.get("epochs"), "trainer.epochs")
+    patience = _require_positive_int(trainer_raw.get("patience"), "trainer.patience")
+    learning_rate = trainer_raw.get("learning_rate")
+    if not isinstance(learning_rate, (int, float)) or float(learning_rate) <= 0.0:
+        raise ConfigError("trainer.learning_rate must be a positive float.")
+    weight_decay = trainer_raw.get("weight_decay")
+    if not isinstance(weight_decay, (int, float)) or float(weight_decay) < 0.0:
+        raise ConfigError("trainer.weight_decay must be a non-negative float.")
+    min_delta = trainer_raw.get("min_delta")
+    if not isinstance(min_delta, (int, float)) or float(min_delta) < 0.0:
+        raise ConfigError("trainer.min_delta must be a non-negative float.")
 
     metrics = _require_string_list(evaluation_raw.get("metrics"), "evaluation.metrics")
     real_observation_only = evaluation_raw.get("real_observation_only")
@@ -250,8 +276,21 @@ def load_config(config_path: str | Path) -> ExperimentConfig:
         runtime=RuntimeSection(output_root=output_root),
         data=_validate_data_section(data_raw),
         normalization=_validate_normalization_section(normalization_raw),
-        model=ModelSection(name=model_name, hidden_size=hidden_size),
-        trainer=TrainerSection(ridge_lambda=float(ridge_lambda)),
+        model=ModelSection(
+            name=model_name,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=float(dropout),
+        ),
+        trainer=TrainerSection(
+            device=device,
+            batch_size=batch_size,
+            epochs=epochs,
+            patience=patience,
+            learning_rate=float(learning_rate),
+            weight_decay=float(weight_decay),
+            min_delta=float(min_delta),
+        ),
         evaluation=EvaluationSection(
             metrics=metrics,
             real_observation_only=real_observation_only,

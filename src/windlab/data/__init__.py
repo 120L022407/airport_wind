@@ -9,6 +9,7 @@ from .normalization import (
     save_normalization_state,
 )
 from .series import PreparedSeriesData, PreparedSeriesSplit, build_series_data
+from .torch_dataset import WindowedTorchDataset
 from .windows import WindowedData, WindowedSplit, build_windowed_data
 
 __all__ = [
@@ -19,6 +20,7 @@ __all__ = [
     "PreparedSeriesSplit",
     "WindowedData",
     "WindowedSplit",
+    "WindowedTorchDataset",
     "apply_normalization",
     "build_series_data",
     "build_windowed_data",

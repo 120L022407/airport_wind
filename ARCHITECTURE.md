@@ -108,23 +108,27 @@ The repository includes automated architecture checks for these constraints.
 
 ## Baseline training design
 
-The local baseline is intentionally lightweight and CPU-friendly:
+The baseline uses PyTorch and remains CPU-friendly for local smoke tests:
 
 - input data comes from the `series` source;
 - the model interface is GRU-shaped and produces
   `[batch, forecast_steps, airport, target]`;
-- local fitting uses a deterministic NumPy implementation so the foundation can
-  be validated without GPU, network access, or external research data.
+- `torch.nn.GRU` encodes `[batch, input_steps, airport * feature]`;
+- a projection head maps the final hidden state to all forecast steps;
+- local tests use synthetic data and a small CPU run.
 
-This is a framework baseline for connectivity and contracts, not a claim of
-state-of-the-art training.
+This is a real trainable baseline and not a claim of state-of-the-art modeling.
 
 ## Required artifacts
 
 Each successful training run saves:
 
 - `config.yaml`
+- `resolved_config.yaml`
 - `checkpoint.pt`
+- `best_checkpoint.pt`
+- `last_checkpoint.pt`
+- `training_log.json`
 - `metrics.json`
 - `normalization.npz`
 

@@ -1,13 +1,16 @@
-"""Generic training flow for configuration-driven experiments."""
+"""Generic PyTorch training flow for configuration-driven experiments."""
 
 from __future__ import annotations
 
 from dataclasses import asdict, replace
 from pathlib import Path
-import pickle
+import shutil
 from typing import Any, Callable, cast
 
 import numpy as np
+import torch
+from torch import nn
+from torch.utils.data import DataLoader
 
 from windlab.config import ExperimentConfig, load_config
 from windlab.data.normalization import (
@@ -17,17 +20,19 @@ from windlab.data.normalization import (
     save_normalization_state,
 )
 from windlab.data.series import PreparedSeriesData, PreparedSeriesSplit
-from windlab.data.windows import WindowedData, build_windowed_data
-from windlab.losses import mse_loss
+from windlab.data.torch_dataset import WindowedTorchDataset
+from windlab.data.windows import WindowedData, WindowedSplit, build_windowed_data
 from windlab.metrics import compute_metrics
-from windlab.models.gru import GRUModel
-from windlab.registry import DATA_BUILDERS, MODELS
-from windlab.utils import create_run_dir, dump_json, dump_yaml, set_seed, timestamped_run_name
+from windlab.registry import DATA_BUILDERS, LOSSES, MODELS
+from windlab.utils import create_run_dir, dump_json, dump_yaml, set_seed
+from windlab.utils import timestamped_run_name
 
+from . import losses as _losses_module  # noqa: F401
 from . import models  # noqa: F401
 from .data import series as _series_module  # noqa: F401
 
 DataBuilderFn = Callable[[ExperimentConfig], PreparedSeriesData]
+LossFn = Callable[[torch.Tensor, torch.Tensor, torch.Tensor | None], torch.Tensor]
 
 
 class Trainer:
@@ -35,6 +40,8 @@ class Trainer:
 
     def __init__(self, config: ExperimentConfig) -> None:
         self.config = config
+        self.device = self._resolve_device(config.trainer.device)
+        self.loss_fn = cast(LossFn, LOSSES.get("mse"))
 
     def fit(self, output_root_override: str | None = None) -> Path:
         set_seed(self.config.experiment.seed)
@@ -47,21 +54,133 @@ class Trainer:
         normalized_prepared = self._apply_normalization(prepared, normalization_state)
         windowed = build_windowed_data(normalized_prepared, self.config)
 
-        model_class = cast(type[GRUModel], MODELS.get(self.config.model.name))
+        model = self._build_model(windowed).to(self.device)
+        optimizer = torch.optim.Adam(
+            model.parameters(),
+            lr=self.config.trainer.learning_rate,
+            weight_decay=self.config.trainer.weight_decay,
+        )
+
+        dump_yaml(run_dir / "config.yaml", asdict(self.config))
+        dump_yaml(run_dir / "resolved_config.yaml", asdict(self.config))
+        save_normalization_state(run_dir / "normalization.npz", normalization_state)
+
+        training_log = self._train_loop(run_dir, model, optimizer, windowed)
+        dump_json(run_dir / "training_log.json", {"epochs": training_log})
+
+        best_checkpoint = self._load_checkpoint(run_dir / "best_checkpoint.pt")
+        model.load_state_dict(best_checkpoint["model_state_dict"])
+        metrics_payload = self._collect_metrics(model, windowed)
+        dump_json(run_dir / "metrics.json", metrics_payload)
+        shutil.copyfile(run_dir / "best_checkpoint.pt", run_dir / "checkpoint.pt")
+        return run_dir
+
+    def _train_loop(
+        self,
+        run_dir: Path,
+        model: nn.Module,
+        optimizer: torch.optim.Optimizer,
+        windowed: WindowedData,
+    ) -> list[dict[str, float | int]]:
+        train_loader = DataLoader(
+            WindowedTorchDataset(windowed.train),
+            batch_size=self.config.trainer.batch_size,
+            shuffle=False,
+        )
+        best_val_loss = float("inf")
+        epochs_without_improvement = 0
+        training_log: list[dict[str, float | int]] = []
+
+        for epoch in range(1, self.config.trainer.epochs + 1):
+            train_loss = self._run_training_epoch(model, optimizer, train_loader)
+            val_loss = self._evaluate_loss(model, windowed.val)
+            log_row: dict[str, float | int] = {
+                "epoch": epoch,
+                "train_loss": train_loss,
+                "val_loss": val_loss,
+            }
+            training_log.append(log_row)
+
+            improved = val_loss < best_val_loss - self.config.trainer.min_delta
+            if improved:
+                best_val_loss = val_loss
+                epochs_without_improvement = 0
+                self._save_checkpoint(
+                    run_dir / "best_checkpoint.pt",
+                    model=model,
+                    optimizer=optimizer,
+                    epoch=epoch,
+                    best_val_loss=best_val_loss,
+                )
+            else:
+                epochs_without_improvement += 1
+
+            self._save_checkpoint(
+                run_dir / "last_checkpoint.pt",
+                model=model,
+                optimizer=optimizer,
+                epoch=epoch,
+                best_val_loss=best_val_loss,
+            )
+
+            if epochs_without_improvement >= self.config.trainer.patience:
+                break
+
+        return training_log
+
+    def _run_training_epoch(
+        self,
+        model: nn.Module,
+        optimizer: torch.optim.Optimizer,
+        train_loader: DataLoader[tuple[torch.Tensor, torch.Tensor, torch.Tensor]],
+    ) -> float:
+        model.train()
+        losses: list[float] = []
+        for inputs, targets, masks in train_loader:
+            inputs = inputs.to(self.device)
+            targets = targets.to(self.device)
+            masks = masks.to(self.device)
+
+            optimizer.zero_grad(set_to_none=True)
+            output = model(inputs)
+            loss = self.loss_fn(output["prediction"], targets, masks)
+            loss.backward()
+            optimizer.step()
+            losses.append(float(loss.detach().cpu().item()))
+        return float(np.mean(losses))
+
+    def _evaluate_loss(self, model: nn.Module, split: WindowedSplit) -> float:
+        model.eval()
+        loader = DataLoader(
+            WindowedTorchDataset(split),
+            batch_size=self.config.trainer.batch_size,
+            shuffle=False,
+        )
+        losses: list[float] = []
+        with torch.no_grad():
+            for inputs, targets, masks in loader:
+                inputs = inputs.to(self.device)
+                targets = targets.to(self.device)
+                masks = masks.to(self.device)
+                output = model(inputs)
+                loss = self.loss_fn(output["prediction"], targets, masks)
+                losses.append(float(loss.detach().cpu().item()))
+        return float(np.mean(losses))
+
+    def _build_model(self, windowed: WindowedData) -> nn.Module:
+        model_class = cast(type[nn.Module], MODELS.get(self.config.model.name))
         model = model_class(
             input_size=windowed.train.inputs.shape[2] * windowed.train.inputs.shape[3],
             hidden_size=self.config.model.hidden_size,
+            num_layers=self.config.model.num_layers,
+            dropout=self.config.model.dropout,
             forecast_steps=self.config.data.forecast_steps,
             airport_count=len(self.config.data.airports),
             target_size=len(self.config.data.target_variables),
-            seed=self.config.experiment.seed,
-            ridge_lambda=self.config.trainer.ridge_lambda,
         )
-        model.fit(windowed.train.inputs, windowed.train.targets)
-
-        metrics_payload = self._collect_metrics(model, windowed)
-        self._save_artifacts(run_dir, model, normalization_state, metrics_payload)
-        return run_dir
+        if not isinstance(model, nn.Module):
+            raise TypeError("Registered model must be a torch.nn.Module.")
+        return model
 
     def _build_data(self) -> PreparedSeriesData:
         data_builder = cast(DataBuilderFn, DATA_BUILDERS.get(self.config.data.source))
@@ -87,7 +206,10 @@ class Trainer:
         split: PreparedSeriesSplit,
         state: NormalizationState,
     ) -> PreparedSeriesSplit:
-        if not self.config.normalization.enabled or not self.config.normalization.apply_to_inputs:
+        if (
+            not self.config.normalization.enabled
+            or not self.config.normalization.apply_to_inputs
+        ):
             return split
         normalized_values = apply_normalization(split.values, state)
         return replace(split, values=normalized_values)
@@ -113,11 +235,11 @@ class Trainer:
 
     def _collect_metrics(
         self,
-        model: GRUModel,
+        model: nn.Module,
         windowed: WindowedData,
     ) -> dict[str, Any]:
-        val_output = model.predict(windowed.val.inputs)
-        test_output = model.predict(windowed.test.inputs)
+        val_prediction = self._predict_numpy(model, windowed.val)
+        test_prediction = self._predict_numpy(model, windowed.test)
         val_mask = (
             windowed.val.observed_target_mask
             if self.config.evaluation.real_observation_only
@@ -130,21 +252,17 @@ class Trainer:
         )
         val_metrics = compute_metrics(
             self.config.evaluation.metrics,
-            val_output["prediction"],
+            val_prediction,
             windowed.val.targets,
             val_mask,
         )
         test_metrics = compute_metrics(
             self.config.evaluation.metrics,
-            test_output["prediction"],
+            test_prediction,
             windowed.test.targets,
             test_mask,
         )
-        val_metrics["mse_loss"] = mse_loss(
-            val_output["prediction"],
-            windowed.val.targets,
-            val_mask,
-        )
+        val_metrics["mse_loss"] = self._evaluate_loss(model, windowed.val)
         return {
             "validation": val_metrics,
             "test": test_metrics,
@@ -152,26 +270,53 @@ class Trainer:
             "metrics": list(self.config.evaluation.metrics),
         }
 
-    def _save_artifacts(
-        self,
-        run_dir: Path,
-        model: GRUModel,
-        normalization_state: NormalizationState,
-        metrics_payload: dict[str, Any],
-    ) -> None:
-        dump_yaml(run_dir / "config.yaml", asdict(self.config))
-        dump_json(run_dir / "metrics.json", metrics_payload)
-        save_normalization_state(run_dir / "normalization.npz", normalization_state)
+    def _predict_numpy(self, model: nn.Module, split: WindowedSplit) -> np.ndarray:
+        model.eval()
+        loader = DataLoader(
+            WindowedTorchDataset(split),
+            batch_size=self.config.trainer.batch_size,
+            shuffle=False,
+        )
+        predictions: list[np.ndarray] = []
+        with torch.no_grad():
+            for inputs, _, _ in loader:
+                output = model(inputs.to(self.device))
+                predictions.append(output["prediction"].detach().cpu().numpy())
+        return np.concatenate(predictions, axis=0)
 
-        checkpoint_payload = {
-            "model_name": self.config.model.name,
-            "epoch": 0,
-            "seed": self.config.experiment.seed,
-            "best_validation_metric": metrics_payload["validation"][self.config.evaluation.metrics[0]],
-            "model_state": model.state_dict(),
-        }
-        with (run_dir / "checkpoint.pt").open("wb") as handle:
-            pickle.dump(checkpoint_payload, handle)
+    def _save_checkpoint(
+        self,
+        path: Path,
+        *,
+        model: nn.Module,
+        optimizer: torch.optim.Optimizer,
+        epoch: int,
+        best_val_loss: float,
+    ) -> None:
+        init_kwargs = getattr(model, "init_kwargs")
+        torch.save(
+            {
+                "model_name": self.config.model.name,
+                "model_init": init_kwargs,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "epoch": epoch,
+                "best_validation_loss": best_val_loss,
+                "seed": self.config.experiment.seed,
+            },
+            path,
+        )
+
+    def _load_checkpoint(self, path: Path) -> dict[str, Any]:
+        return cast(dict[str, Any], torch.load(path, map_location=self.device))
+
+    def _resolve_device(self, configured_device: str) -> torch.device:
+        if configured_device == "auto":
+            return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = torch.device(configured_device)
+        if device.type == "cuda" and not torch.cuda.is_available():
+            raise RuntimeError("Configured CUDA device is not available.")
+        return device
 
 
 def train_from_config(

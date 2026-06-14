@@ -2,29 +2,24 @@
 
 from __future__ import annotations
 
-import numpy as np
-from numpy.typing import NDArray
+import torch
 
 from windlab.registry import LOSSES
 
-FloatArray = NDArray[np.float64]
-BoolArray = NDArray[np.bool_]
 
-
-def mse_loss(
-    prediction: FloatArray,
-    target: FloatArray,
-    mask: BoolArray | None = None,
-) -> float:
-    errors = prediction - target
-    squared = errors * errors
+def masked_mse_loss(
+    prediction: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor | None = None,
+) -> torch.Tensor:
+    squared_error = (prediction - target) ** 2
     if mask is None:
-        return float(np.mean(squared))
-    active = squared[mask]
-    if active.size == 0:
-        raise ValueError("Mask selects no elements for mse_loss.")
-    return float(np.mean(active))
+        return squared_error.mean()
+    active = squared_error[mask.bool()]
+    if active.numel() == 0:
+        raise ValueError("Mask selects no elements for masked_mse_loss.")
+    return active.mean()
 
 
 if "mse" not in LOSSES.keys():
-    LOSSES.register("mse", mse_loss)
+    LOSSES.register("mse", masked_mse_loss)

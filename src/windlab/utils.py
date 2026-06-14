@@ -8,6 +8,7 @@ import random
 from typing import Any
 
 import numpy as np
+import torch
 import yaml
 
 
@@ -47,6 +48,9 @@ def dump_json(path: str | Path, payload: dict[str, Any]) -> None:
 def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 def timestamped_run_name(base_name: str) -> str:
