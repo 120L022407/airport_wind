@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
-from pathlib import Path
 import tempfile
-from typing import Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -15,13 +16,13 @@ _MPLCONFIGDIR = Path(tempfile.gettempdir()) / "airport_wind_lab_matplotlib"
 _MPLCONFIGDIR.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("MPLCONFIGDIR", str(_MPLCONFIGDIR))
 
-import matplotlib
+import matplotlib  # noqa: E402
 
 matplotlib.use("Agg")
 from matplotlib import pyplot as plt  # noqa: E402
 
 FloatArray = NDArray[np.float64]
-IntArray = NDArray[np.integer]
+IntArray = NDArray[np.integer[Any]]
 
 DEFAULT_LEADS = (1, 6, 12, 24)
 DEFAULT_FIRST_N = 300
@@ -225,7 +226,12 @@ def _plot_fixed_lead_series(
     )
     for airport_index, axis in enumerate(axes[:, 0]):
         axis.plot(times, targets[:, airport_index], label="Observed", linewidth=1.2)
-        axis.plot(times, predictions[:, airport_index], label="Prediction", linewidth=1.2)
+        axis.plot(
+            times,
+            predictions[:, airport_index],
+            label="Prediction",
+            linewidth=1.2,
+        )
         axis.set_ylabel("Wind speed (m/s)")
         axis.set_title(str(airport_labels[airport_index]))
         axis.grid(True, alpha=0.25)

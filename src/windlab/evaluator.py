@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 import numpy as np
 import torch
+from numpy.typing import NDArray
 from torch import nn
 from torch.utils.data import DataLoader
 
@@ -17,12 +19,14 @@ from windlab.data.series import PreparedSeriesData, PreparedSeriesSplit
 from windlab.data.torch_dataset import WindowedTorchDataset
 from windlab.data.windows import WindowedData, WindowedSplit, build_windowed_data
 from windlab.metrics import compute_metrics
-from windlab.reporting import save_test_prediction_figures
 from windlab.registry import DATA_BUILDERS, MODELS
+from windlab.reporting import save_test_prediction_figures
 from windlab.utils import dump_json
 
 from . import models  # noqa: F401
 from .data import series as _series_module  # noqa: F401
+
+FloatArray = NDArray[np.float64]
 
 DataBuilderFn = Callable[[ExperimentConfig], PreparedSeriesData]
 
@@ -37,7 +41,9 @@ class Evaluator:
         config = load_config(self.run_dir / "config.yaml")
         device = self._resolve_device(config.trainer.device)
         prepared = self._build_data(config)
-        normalization_state = load_normalization_state(self.run_dir / "normalization.npz")
+        normalization_state = load_normalization_state(
+            self.run_dir / "normalization.npz"
+        )
         normalized = self._apply_normalization(
             prepared,
             normalization_state,
@@ -148,19 +154,20 @@ class Evaluator:
         model: nn.Module,
         split: WindowedSplit,
         device: torch.device,
-    ) -> np.ndarray:
+    ) -> FloatArray:
         model.eval()
         loader = DataLoader(
             WindowedTorchDataset(split),
             batch_size=config.trainer.batch_size,
             shuffle=False,
         )
-        predictions: list[np.ndarray] = []
+        predictions: list[FloatArray] = []
         with torch.no_grad():
             for inputs, _, _ in loader:
                 output = model(inputs.to(device))
-                predictions.append(output["prediction"].detach().cpu().numpy())
-        return np.concatenate(predictions, axis=0)
+                prediction = output["prediction"].detach().cpu().numpy()
+                predictions.append(prediction.astype(np.float64, copy=False))
+        return cast(FloatArray, np.concatenate(predictions, axis=0))
 
     def _resolve_device(self, configured_device: str) -> torch.device:
         if configured_device == "auto":

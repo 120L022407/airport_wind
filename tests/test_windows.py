@@ -55,8 +55,16 @@ normalization:
 model:
   name: gru
   hidden_size: 8
+  num_layers: 1
+  dropout: 0.0
 trainer:
-  ridge_lambda: 0.001
+  device: cpu
+  batch_size: 4
+  epochs: 1
+  patience: 1
+  learning_rate: 0.001
+  weight_decay: 0.0
+  min_delta: 0.0
 evaluation:
   metrics: [mae]
   real_observation_only: true
@@ -67,4 +75,7 @@ evaluation:
     prepared = build_series_data(config)
     windowed = build_windowed_data(prepared, config)
     expected_mask = np.array([True, False])
-    assert np.array_equal(windowed.train.observed_target_mask[0, :, 0, 0], expected_mask)
+    assert np.array_equal(
+        windowed.train.observed_target_mask[0, :, 0, 0],
+        expected_mask,
+    )

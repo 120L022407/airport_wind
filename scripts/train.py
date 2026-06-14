@@ -12,7 +12,7 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from windlab.trainer import train_from_config
+from windlab.trainer import train_from_config  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:

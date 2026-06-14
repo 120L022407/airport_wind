@@ -7,8 +7,11 @@ from typing import Any
 import torch
 from torch import nn
 
-from windlab.models.base import flatten_airport_features, reshape_prediction
-from windlab.models.base import validate_forecast_input
+from windlab.models.base import (
+    flatten_airport_features,
+    reshape_prediction,
+    validate_forecast_input,
+)
 from windlab.registry import MODELS
 
 
@@ -70,7 +73,7 @@ class ITransformerModel(nn.Module):
             "dropout": self.dropout,
         }
 
-    def forward(self, inputs: torch.Tensor) -> dict[str, torch.Tensor]:
+    def forward(self, inputs: torch.Tensor) -> dict[str, Any]:
         batch_size, _ = validate_forecast_input(inputs, self.input_size)
         flattened = flatten_airport_features(inputs)
         variate_tokens = flattened.transpose(1, 2)

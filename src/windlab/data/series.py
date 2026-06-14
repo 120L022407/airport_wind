@@ -40,7 +40,11 @@ class PreparedSeriesData:
     test: PreparedSeriesSplit
 
 
-def _resolve_indices(all_names: list[str], selected_names: list[str], label: str) -> list[int]:
+def _resolve_indices(
+    all_names: list[str],
+    selected_names: list[str],
+    label: str,
+) -> list[int]:
     indices: list[int] = []
     missing: list[str] = []
     for name in selected_names:
@@ -107,20 +111,27 @@ def build_series_data(config: ExperimentConfig) -> PreparedSeriesData:
         raise DatasetLoadError("Series metadata is missing airports or variables.")
 
     airport_indices = _resolve_indices(airports, config.data.airports, "airports")
-    input_indices = _resolve_indices(variables, config.data.input_variables, "variables")
+    input_indices = _resolve_indices(
+        variables,
+        config.data.input_variables,
+        "variables",
+    )
     target_indices = _resolve_indices(
         variables, config.data.target_variables, "target variables"
     )
 
-    train_mask = None if loaded.original_masks is None else loaded.original_masks["train"]
+    train_mask = (
+        None if loaded.original_masks is None else loaded.original_masks["train"]
+    )
     val_mask = None if loaded.original_masks is None else loaded.original_masks["val"]
     test_mask = None if loaded.original_masks is None else loaded.original_masks["test"]
 
     time_resolution = loaded.metadata["time_resolution"]
     if time_resolution != config.data.time_resolution:
         raise DatasetLoadError(
-            f"Configured time resolution {config.data.time_resolution!r} does not match "
-            f"dataset metadata {time_resolution!r}."
+            "Configured time resolution "
+            f"{config.data.time_resolution!r} does not match dataset metadata "
+            f"{time_resolution!r}."
         )
 
     return PreparedSeriesData(

@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import torch
 from torch import nn
-from torch.nn import functional as F
+from torch.nn import functional
 
-from windlab.models.base import flatten_airport_features, reshape_prediction
-from windlab.models.base import validate_forecast_input
+from windlab.models.base import (
+    flatten_airport_features,
+    reshape_prediction,
+    validate_forecast_input,
+)
 from windlab.registry import MODELS
 
 
@@ -62,7 +65,7 @@ class DLinearModel(nn.Module):
             "individual": self.individual,
         }
 
-    def forward(self, inputs: torch.Tensor) -> dict[str, torch.Tensor]:
+    def forward(self, inputs: torch.Tensor) -> dict[str, Any]:
         batch_size, _ = validate_forecast_input(inputs, self.input_size)
         flattened = flatten_airport_features(inputs)
         trend = self._moving_average(flattened)
@@ -80,15 +83,23 @@ class DLinearModel(nn.Module):
 
     def _moving_average(self, values: torch.Tensor) -> torch.Tensor:
         padding = self.moving_avg // 2
-        padded = F.pad(values.transpose(1, 2), (padding, padding), mode="replicate")
-        averaged = F.avg_pool1d(padded, kernel_size=self.moving_avg, stride=1)
+        padded = functional.pad(
+            values.transpose(1, 2),
+            (padding, padding),
+            mode="replicate",
+        )
+        averaged = functional.avg_pool1d(padded, kernel_size=self.moving_avg, stride=1)
         return averaged.transpose(1, 2)
 
-    def _linear_forecast(self, seasonal: torch.Tensor, trend: torch.Tensor) -> torch.Tensor:
+    def _linear_forecast(
+        self,
+        seasonal: torch.Tensor,
+        trend: torch.Tensor,
+    ) -> torch.Tensor:
         if not self.individual:
             seasonal_out = self.seasonal_layer(seasonal.transpose(1, 2))
             trend_out = self.trend_layer(trend.transpose(1, 2))
-            return (seasonal_out + trend_out).transpose(1, 2)
+            return cast(torch.Tensor, (seasonal_out + trend_out).transpose(1, 2))
 
         channel_outputs: list[torch.Tensor] = []
         for channel in range(self.input_size):

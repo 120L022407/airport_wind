@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import shutil
+from collections.abc import Callable
 from dataclasses import asdict, replace
 from pathlib import Path
-import shutil
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 import numpy as np
 import torch
+from numpy.typing import NDArray
 from torch import nn
 from torch.utils.data import DataLoader
 
@@ -24,8 +26,13 @@ from windlab.data.torch_dataset import WindowedTorchDataset
 from windlab.data.windows import WindowedData, WindowedSplit, build_windowed_data
 from windlab.metrics import compute_metrics
 from windlab.registry import DATA_BUILDERS, LOSSES, MODELS
-from windlab.utils import create_run_dir, dump_json, dump_yaml, set_seed
-from windlab.utils import timestamped_run_name
+from windlab.utils import (
+    create_run_dir,
+    dump_json,
+    dump_yaml,
+    set_seed,
+    timestamped_run_name,
+)
 
 from . import losses as _losses_module  # noqa: F401
 from . import models  # noqa: F401
@@ -33,6 +40,7 @@ from .data import series as _series_module  # noqa: F401
 
 DataBuilderFn = Callable[[ExperimentConfig], PreparedSeriesData]
 LossFn = Callable[[torch.Tensor, torch.Tensor, torch.Tensor | None], torch.Tensor]
+FloatArray = NDArray[np.float64]
 
 
 class Trainer:
@@ -61,8 +69,9 @@ class Trainer:
             weight_decay=self.config.trainer.weight_decay,
         )
 
-        dump_yaml(run_dir / "config.yaml", asdict(self.config))
-        dump_yaml(run_dir / "resolved_config.yaml", asdict(self.config))
+        config_payload = self._config_artifact_payload()
+        dump_yaml(run_dir / "config.yaml", config_payload)
+        dump_yaml(run_dir / "resolved_config.yaml", config_payload)
         save_normalization_state(run_dir / "normalization.npz", normalization_state)
 
         training_log = self._train_loop(run_dir, model, optimizer, windowed)
@@ -144,7 +153,7 @@ class Trainer:
             optimizer.zero_grad(set_to_none=True)
             output = model(inputs)
             loss = self.loss_fn(output["prediction"], targets, masks)
-            loss.backward()
+            cast(Any, loss).backward()
             optimizer.step()
             losses.append(float(loss.detach().cpu().item()))
         return float(np.mean(losses))
@@ -187,6 +196,21 @@ class Trainer:
         if not isinstance(built, PreparedSeriesData):
             raise TypeError("Data builder must return PreparedSeriesData.")
         return built
+
+    def _config_artifact_payload(self) -> dict[str, Any]:
+        model_payload = {
+            "name": self.config.model.name,
+            **self.config.model.parameters,
+        }
+        return {
+            "experiment": asdict(self.config.experiment),
+            "runtime": asdict(self.config.runtime),
+            "data": asdict(self.config.data),
+            "normalization": asdict(self.config.normalization),
+            "model": model_payload,
+            "trainer": asdict(self.config.trainer),
+            "evaluation": asdict(self.config.evaluation),
+        }
 
     def _apply_normalization(
         self,
@@ -269,19 +293,20 @@ class Trainer:
             "metrics": list(self.config.evaluation.metrics),
         }
 
-    def _predict_numpy(self, model: nn.Module, split: WindowedSplit) -> np.ndarray:
+    def _predict_numpy(self, model: nn.Module, split: WindowedSplit) -> FloatArray:
         model.eval()
         loader = DataLoader(
             WindowedTorchDataset(split),
             batch_size=self.config.trainer.batch_size,
             shuffle=False,
         )
-        predictions: list[np.ndarray] = []
+        predictions: list[FloatArray] = []
         with torch.no_grad():
             for inputs, _, _ in loader:
                 output = model(inputs.to(self.device))
-                predictions.append(output["prediction"].detach().cpu().numpy())
-        return np.concatenate(predictions, axis=0)
+                prediction = output["prediction"].detach().cpu().numpy()
+                predictions.append(prediction.astype(np.float64, copy=False))
+        return cast(FloatArray, np.concatenate(predictions, axis=0))
 
     def _save_checkpoint(
         self,
@@ -292,7 +317,7 @@ class Trainer:
         epoch: int,
         best_val_loss: float,
     ) -> None:
-        init_kwargs = getattr(model, "init_kwargs")
+        init_kwargs = cast(Any, model).init_kwargs
         torch.save(
             {
                 "model_name": self.config.model.name,

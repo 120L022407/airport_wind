@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -67,7 +67,9 @@ def _validate_series_metadata(
     time_resolution = metadata.get("time_resolution")
     metadata_source = metadata.get("source")
 
-    if not isinstance(airports, list) or not all(isinstance(item, str) for item in airports):
+    if not isinstance(airports, list) or not all(
+        isinstance(item, str) for item in airports
+    ):
         raise DatasetLoadError("metadata.airports must be a list of strings.")
     if not isinstance(variables, list) or not all(
         isinstance(item, str) for item in variables
@@ -85,7 +87,8 @@ def _validate_series_metadata(
     for split_name, array in splits.items():
         if array.ndim != 3:
             raise DatasetLoadError(
-                f"{split_name}.npy for {source} must have shape [time, airport, variable]."
+                f"{split_name}.npy for {source} must have shape "
+                "[time, airport, variable]."
             )
         if array.shape[1] != expected_airports or array.shape[2] != expected_variables:
             raise DatasetLoadError(

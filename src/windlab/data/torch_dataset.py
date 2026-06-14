@@ -19,5 +19,8 @@ class WindowedTorchDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.Tenso
     def __len__(self) -> int:
         return int(self.inputs.shape[0])
 
-    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def __getitem__(
+        self,
+        index: int,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         return self.inputs[index], self.targets[index], self.masks[index]

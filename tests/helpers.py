@@ -6,7 +6,6 @@ from typing import Any
 
 import numpy as np
 
-
 SERIES_AIRPORTS = ["ZGSZ", "ZGGG", "VHHH", "VMMC"]
 SERIES_VARIABLES = [
     "sknt",
@@ -50,7 +49,10 @@ def create_series_fixture(dataset_root: Path, source: str) -> None:
         )
         np.save(dataset_root / f"{split_name}.npy", array)
         if source == "series_15min":
-            mask = np.array([(index % 2) == 0 for index in range(time_length)], dtype=bool)
+            mask = np.array(
+                [(index % 2) == 0 for index in range(time_length)],
+                dtype=bool,
+            )
             np.save(dataset_root / f"{split_name}_original_mask.npy", mask)
 
     _write_json(

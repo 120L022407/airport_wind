@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 
 from windlab.reporting import (
     ReportingError,
@@ -17,7 +18,7 @@ def _arrays(
     horizon: int = 24,
     airport_count: int = 4,
     target_count: int = 1,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.int64]]:
     size = window_count * horizon * airport_count * target_count
     predictions = np.arange(size, dtype=np.float64).reshape(
         window_count,

@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import ast
-from pathlib import Path
 import sys
+from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -95,8 +95,9 @@ def _check_forbidden_imports(errors: list[str]) -> None:
                     import_name == prefix or import_name.startswith(prefix + ".")
                     for prefix in forbidden_prefixes
                 ):
+                    relative_path = path.relative_to(PROJECT_ROOT)
                     errors.append(
-                        f"{path.relative_to(PROJECT_ROOT)} imports forbidden module {import_name}"
+                        f"{relative_path} imports forbidden module {import_name}"
                     )
 
 

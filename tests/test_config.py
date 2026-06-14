@@ -22,6 +22,11 @@ def test_load_baseline_config() -> None:
         ("config/patchtst/baseline_hourly.yaml", "patchtst"),
         ("config/itransformer/baseline_hourly.yaml", "itransformer"),
         ("config/dlinear/baseline_hourly.yaml", "dlinear"),
+        ("config/tfps/baseline_hourly.yaml", "tfps"),
+        ("config/tfps/time_only_hourly.yaml", "tfps"),
+        ("config/tfps/no_pattern_experts_hourly.yaml", "tfps"),
+        ("config/timebridge/baseline_hourly.yaml", "timebridge"),
+        ("config/timebridge/no_cointegration_hourly.yaml", "timebridge"),
     ],
 )
 def test_load_additional_model_configs(config_path: str, model_name: str) -> None:
@@ -189,6 +194,84 @@ model:
         load_config(config_path)
 
 
+def test_config_rejects_tfps_expert_top_k_mismatch(tmp_path: Path) -> None:
+    config_path = tmp_path / "invalid_tfps_top_k.yaml"
+    config_path.write_text(
+        _valid_config_text(_tfps_model_block("time_top_k: 5")),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="time_top_k"):
+        load_config(config_path)
+
+
+def test_config_rejects_tfps_without_active_domain(tmp_path: Path) -> None:
+    config_path = tmp_path / "invalid_tfps_domains.yaml"
+    config_path.write_text(
+        _valid_config_text(
+            _tfps_model_block("use_time_domain: false\n  use_frequency_domain: false")
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="domain"):
+        load_config(config_path)
+
+
+def test_config_rejects_tfps_experts_without_identifier(tmp_path: Path) -> None:
+    config_path = tmp_path / "invalid_tfps_identifier.yaml"
+    config_path.write_text(
+        _valid_config_text(
+            _tfps_model_block(
+                "use_pattern_identifier: false\n  use_pattern_experts: true"
+            )
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="use_pattern_experts"):
+        load_config(config_path)
+
+
+def test_config_rejects_tfps_incompatible_subspace_size(tmp_path: Path) -> None:
+    config_path = tmp_path / "invalid_tfps_subspace.yaml"
+    config_path.write_text(
+        _valid_config_text(_tfps_model_block("time_num_experts: 3")),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="time_num_experts"):
+        load_config(config_path)
+
+
+def test_config_rejects_timebridge_non_divisible_period(tmp_path: Path) -> None:
+    config_path = tmp_path / "invalid_timebridge_period.yaml"
+    config_path.write_text(
+        _valid_config_text(_timebridge_model_block("period: 5")),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="period"):
+        load_config(config_path)
+
+
+def test_config_rejects_timebridge_num_p_too_large(tmp_path: Path) -> None:
+    config_path = tmp_path / "invalid_timebridge_num_p.yaml"
+    config_path.write_text(
+        _valid_config_text(_timebridge_model_block("num_p: 5")),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="num_p"):
+        load_config(config_path)
+
+
+def test_config_rejects_timebridge_shared_time_feature_count_too_large(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "invalid_timebridge_shared_time.yaml"
+    config_path.write_text(
+        _valid_config_text(_timebridge_model_block("shared_time_feature_count: 1")),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="shared_time_feature_count"):
+        load_config(config_path)
+
+
 def _valid_config_text(model_block: str) -> str:
     return f"""
 experiment:
@@ -223,3 +306,68 @@ evaluation:
   metrics: [mae]
   real_observation_only: true
 """
+
+
+def _tfps_model_block(override_line: str) -> str:
+    replacements = {
+        line.split(":", 1)[0].strip(): line.strip()
+        for line in override_line.splitlines()
+        if line.strip()
+    }
+    lines = [
+        "model:",
+        "  name: tfps",
+        "  d_model: 16",
+        "  num_layers: 1",
+        "  n_heads: 4",
+        "  ff_dim: 32",
+        "  dropout: 0.0",
+        "  patch_len: 6",
+        "  stride: 3",
+        "  time_num_experts: 2",
+        "  time_top_k: 1",
+        "  frequency_num_experts: 2",
+        "  frequency_top_k: 1",
+        "  expert_hidden_size: 32",
+        "  subspace_eta: 5.0",
+        "  use_time_domain: true",
+        "  use_frequency_domain: true",
+        "  use_pattern_identifier: true",
+        "  use_pattern_experts: true",
+        "  noisy_gating: false",
+    ]
+    updated_lines = []
+    for line in lines:
+        key = line.split(":", 1)[0].strip()
+        updated_lines.append(f"  {replacements[key]}" if key in replacements else line)
+    return "\n".join(updated_lines) + "\n"
+
+
+def _timebridge_model_block(override_line: str) -> str:
+    replacements = {
+        line.split(":", 1)[0].strip(): line.strip()
+        for line in override_line.splitlines()
+        if line.strip()
+    }
+    lines = [
+        "model:",
+        "  name: timebridge",
+        "  period: 6",
+        "  num_p: 2",
+        "  ia_layers: 1",
+        "  pd_layers: 1",
+        "  ca_layers: 1",
+        "  stable_len: 6",
+        "  shared_time_feature_count: 0",
+        "  d_model: 16",
+        "  n_heads: 4",
+        "  d_ff: 32",
+        "  dropout: 0.0",
+        "  attn_dropout: 0.1",
+        "  activation: gelu",
+    ]
+    updated_lines = []
+    for line in lines:
+        key = line.split(":", 1)[0].strip()
+        updated_lines.append(f"  {replacements[key]}" if key in replacements else line)
+    return "\n".join(updated_lines) + "\n"

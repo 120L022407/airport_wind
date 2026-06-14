@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
-from pathlib import Path
 import re
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -13,7 +13,14 @@ import yaml
 SUPPORTED_SOURCES = {"series", "series_15min", "EC"}
 SUPPORTED_NORMALIZATION_METHODS = {"zscore"}
 SUPPORTED_FIT_SPLITS = {"train"}
-SUPPORTED_MODELS = {"gru", "patchtst", "itransformer", "dlinear"}
+SUPPORTED_MODELS = {
+    "gru",
+    "patchtst",
+    "itransformer",
+    "dlinear",
+    "tfps",
+    "timebridge",
+}
 
 _ENV_PATTERN = re.compile(r"\$\{([A-Z0-9_]+)(?::-(.+?))?\}")
 
@@ -210,6 +217,13 @@ def _require_model_positive_int(raw: dict[str, Any], field_name: str) -> int:
     return _require_positive_int(raw.get(field_name), f"model.{field_name}")
 
 
+def _require_model_non_negative_int(raw: dict[str, Any], field_name: str) -> int:
+    value = raw.get(field_name)
+    if not isinstance(value, int) or value < 0:
+        raise ConfigError(f"model.{field_name} must be a non-negative integer.")
+    return value
+
+
 def _require_model_float_range(
     raw: dict[str, Any],
     field_name: str,
@@ -221,6 +235,20 @@ def _require_model_float_range(
     if not isinstance(value, (int, float)) or not minimum <= float(value) < maximum:
         raise ConfigError(f"model.{field_name} must be in [{minimum}, {maximum}).")
     return float(value)
+
+
+def _require_model_positive_float(raw: dict[str, Any], field_name: str) -> float:
+    value = raw.get(field_name)
+    if not isinstance(value, (int, float)) or float(value) <= 0.0:
+        raise ConfigError(f"model.{field_name} must be a positive float.")
+    return float(value)
+
+
+def _require_model_bool(raw: dict[str, Any], field_name: str) -> bool:
+    value = raw.get(field_name)
+    if not isinstance(value, bool):
+        raise ConfigError(f"model.{field_name} must be a boolean.")
+    return value
 
 
 def _reject_unknown_model_fields(
@@ -239,6 +267,153 @@ def _reject_unknown_model_fields(
 def _validate_transformer_heads(d_model: int, n_heads: int) -> None:
     if d_model % n_heads != 0:
         raise ConfigError("model.d_model must be divisible by model.n_heads.")
+
+
+def _validate_tfps_section(
+    raw: dict[str, Any],
+    transformer_fields: set[str],
+) -> ModelSection:
+    _reject_unknown_model_fields(
+        raw,
+        transformer_fields
+        | {
+            "patch_len",
+            "stride",
+            "time_num_experts",
+            "time_top_k",
+            "frequency_num_experts",
+            "frequency_top_k",
+            "expert_hidden_size",
+            "subspace_eta",
+            "use_time_domain",
+            "use_frequency_domain",
+            "use_pattern_identifier",
+            "use_pattern_experts",
+            "noisy_gating",
+        },
+        "tfps",
+    )
+    d_model = _require_model_positive_int(raw, "d_model")
+    n_heads = _require_model_positive_int(raw, "n_heads")
+    _validate_transformer_heads(d_model, n_heads)
+    time_num_experts = _require_model_positive_int(raw, "time_num_experts")
+    time_top_k = _require_model_positive_int(raw, "time_top_k")
+    frequency_num_experts = _require_model_positive_int(
+        raw,
+        "frequency_num_experts",
+    )
+    frequency_top_k = _require_model_positive_int(raw, "frequency_top_k")
+    if time_top_k > time_num_experts:
+        raise ConfigError("model.time_top_k must be <= model.time_num_experts.")
+    if frequency_top_k > frequency_num_experts:
+        raise ConfigError(
+            "model.frequency_top_k must be <= model.frequency_num_experts."
+        )
+    use_time_domain = _require_model_bool(raw, "use_time_domain")
+    use_frequency_domain = _require_model_bool(raw, "use_frequency_domain")
+    use_pattern_identifier = _require_model_bool(raw, "use_pattern_identifier")
+    use_pattern_experts = _require_model_bool(raw, "use_pattern_experts")
+    if not use_time_domain and not use_frequency_domain:
+        raise ConfigError("At least one TFPS domain branch must be enabled.")
+    if use_pattern_experts and not use_pattern_identifier:
+        raise ConfigError("model.use_pattern_experts requires use_pattern_identifier.")
+
+    return ModelSection(
+        name="tfps",
+        parameters={
+            "d_model": d_model,
+            "num_layers": _require_model_positive_int(raw, "num_layers"),
+            "n_heads": n_heads,
+            "ff_dim": _require_model_positive_int(raw, "ff_dim"),
+            "dropout": _require_model_float_range(
+                raw,
+                "dropout",
+                minimum=0.0,
+                maximum=1.0,
+            ),
+            "patch_len": _require_model_positive_int(raw, "patch_len"),
+            "stride": _require_model_positive_int(raw, "stride"),
+            "time_num_experts": time_num_experts,
+            "time_top_k": time_top_k,
+            "frequency_num_experts": frequency_num_experts,
+            "frequency_top_k": frequency_top_k,
+            "expert_hidden_size": _require_model_positive_int(
+                raw,
+                "expert_hidden_size",
+            ),
+            "subspace_eta": _require_model_positive_float(raw, "subspace_eta"),
+            "use_time_domain": use_time_domain,
+            "use_frequency_domain": use_frequency_domain,
+            "use_pattern_identifier": use_pattern_identifier,
+            "use_pattern_experts": use_pattern_experts,
+            "noisy_gating": _require_model_bool(raw, "noisy_gating"),
+        },
+    )
+
+
+def _validate_timebridge_section(
+    raw: dict[str, Any],
+    transformer_fields: set[str],
+) -> ModelSection:
+    _ = transformer_fields
+    _reject_unknown_model_fields(
+        raw,
+        {
+            "name",
+            "period",
+            "num_p",
+            "ia_layers",
+            "pd_layers",
+            "ca_layers",
+            "stable_len",
+            "d_model",
+            "n_heads",
+            "d_ff",
+            "dropout",
+            "attn_dropout",
+            "shared_time_feature_count",
+            "activation",
+        },
+        "timebridge",
+    )
+    d_model = _require_model_positive_int(raw, "d_model")
+    n_heads = _require_model_positive_int(raw, "n_heads")
+    _validate_transformer_heads(d_model, n_heads)
+    activation = raw.get("activation")
+    if not isinstance(activation, str) or activation not in {"relu", "gelu"}:
+        raise ConfigError("model.activation must be 'relu' or 'gelu'.")
+
+    return ModelSection(
+        name="timebridge",
+        parameters={
+            "period": _require_model_positive_int(raw, "period"),
+            "num_p": _require_model_positive_int(raw, "num_p"),
+            "ia_layers": _require_model_non_negative_int(raw, "ia_layers"),
+            "pd_layers": _require_model_non_negative_int(raw, "pd_layers"),
+            "ca_layers": _require_model_non_negative_int(raw, "ca_layers"),
+            "stable_len": _require_model_positive_int(raw, "stable_len"),
+            "shared_time_feature_count": _require_model_non_negative_int(
+                raw,
+                "shared_time_feature_count",
+            ),
+            "d_model": d_model,
+            "n_heads": n_heads,
+            "d_ff": _require_model_positive_int(raw, "d_ff"),
+            "dropout": _require_model_float_range(
+                raw,
+                "dropout",
+                minimum=0.0,
+                maximum=1.0,
+            ),
+            "attn_dropout": _require_model_float_range(
+                raw,
+                "attn_dropout",
+                minimum=0.0,
+                maximum=1.0,
+            ),
+            "activation": activation,
+        },
+    )
 
 
 def _validate_model_section(raw: dict[str, Any]) -> ModelSection:
@@ -321,6 +496,10 @@ def _validate_model_section(raw: dict[str, Any]) -> ModelSection:
                 ),
             },
         )
+    if model_name == "tfps":
+        return _validate_tfps_section(raw, transformer_fields)
+    if model_name == "timebridge":
+        return _validate_timebridge_section(raw, transformer_fields)
 
     _reject_unknown_model_fields(raw, {"name", "moving_avg", "individual"}, model_name)
     individual = raw.get("individual")
@@ -350,9 +529,7 @@ def load_config(config_path: str | Path) -> ExperimentConfig:
     experiment_raw = _require_mapping(raw_yaml.get("experiment"), "experiment")
     runtime_raw = _require_mapping(raw_yaml.get("runtime"), "runtime")
     data_raw = _require_mapping(raw_yaml.get("data"), "data")
-    normalization_raw = _require_mapping(
-        raw_yaml.get("normalization"), "normalization"
-    )
+    normalization_raw = _require_mapping(raw_yaml.get("normalization"), "normalization")
     model_raw = _require_mapping(raw_yaml.get("model"), "model")
     trainer_raw = _require_mapping(raw_yaml.get("trainer"), "trainer")
     evaluation_raw = _require_mapping(raw_yaml.get("evaluation"), "evaluation")
@@ -376,11 +553,60 @@ def load_config(config_path: str | Path) -> ExperimentConfig:
         and int(model_section.parameters["patch_len"]) > data_section.input_steps
     ):
         raise ConfigError("model.patch_len must be <= data.input_steps.")
+    if model_section.name == "tfps":
+        patch_len = int(model_section.parameters["patch_len"])
+        if patch_len > data_section.input_steps:
+            raise ConfigError("model.patch_len must be <= data.input_steps.")
+        if patch_len > data_section.forecast_steps:
+            raise ConfigError("model.patch_len must be <= data.forecast_steps.")
+        if bool(model_section.parameters["use_pattern_identifier"]):
+            flattened_input_size = len(data_section.airports) * len(
+                data_section.input_variables
+            )
+            feature_dim = flattened_input_size * int(
+                model_section.parameters["d_model"]
+            )
+            if bool(model_section.parameters["use_time_domain"]):
+                time_num_experts = int(model_section.parameters["time_num_experts"])
+                if feature_dim % time_num_experts != 0:
+                    raise ConfigError(
+                        "airport/input variable/d_model product must be divisible "
+                        "by model.time_num_experts."
+                    )
+            if bool(model_section.parameters["use_frequency_domain"]):
+                frequency_num_experts = int(
+                    model_section.parameters["frequency_num_experts"]
+                )
+                if feature_dim % frequency_num_experts != 0:
+                    raise ConfigError(
+                        "airport/input variable/d_model product must be divisible "
+                        "by model.frequency_num_experts."
+                    )
+    if model_section.name == "timebridge":
+        period = int(model_section.parameters["period"])
+        if data_section.input_steps % period != 0:
+            raise ConfigError("model.period must divide data.input_steps.")
+        input_patch_count = data_section.input_steps // period
+        if int(model_section.parameters["num_p"]) > input_patch_count:
+            raise ConfigError(
+                "model.num_p must be <= data.input_steps // model.period."
+            )
+        shared_time_feature_count = int(
+            model_section.parameters["shared_time_feature_count"]
+        )
+        if shared_time_feature_count >= len(data_section.input_variables):
+            raise ConfigError(
+                "model.shared_time_feature_count must be smaller than "
+                "data.input_variables length."
+            )
 
     device = trainer_raw.get("device")
     if not isinstance(device, str) or not device:
         raise ConfigError("trainer.device must be a non-empty string.")
-    batch_size = _require_positive_int(trainer_raw.get("batch_size"), "trainer.batch_size")
+    batch_size = _require_positive_int(
+        trainer_raw.get("batch_size"),
+        "trainer.batch_size",
+    )
     epochs = _require_positive_int(trainer_raw.get("epochs"), "trainer.epochs")
     patience = _require_positive_int(trainer_raw.get("patience"), "trainer.patience")
     learning_rate = trainer_raw.get("learning_rate")

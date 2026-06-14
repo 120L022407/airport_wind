@@ -13,7 +13,7 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from windlab.evaluator import evaluate_run_dir
+from windlab.evaluator import evaluate_run_dir  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:

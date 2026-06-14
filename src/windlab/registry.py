@@ -11,7 +11,7 @@ class RegistryError(ValueError):
     """Raised when a registry operation is invalid."""
 
 
-class Registry(Generic[T]):
+class Registry(Generic[T]):  # noqa: UP046
     """Simple name-to-object registry."""
 
     def __init__(self, name: str) -> None:

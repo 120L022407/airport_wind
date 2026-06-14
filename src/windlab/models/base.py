@@ -14,7 +14,9 @@ def validate_forecast_input(inputs: torch.Tensor, input_size: int) -> tuple[int,
     batch_size, input_steps, airport_count, feature_count = inputs.shape
     flattened_size = airport_count * feature_count
     if flattened_size != input_size:
-        raise ValueError(f"Expected flattened input size {input_size}, got {flattened_size}.")
+        raise ValueError(
+            f"Expected flattened input size {input_size}, got {flattened_size}."
+        )
     return batch_size, input_steps
 
 
