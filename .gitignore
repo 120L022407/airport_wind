@@ -41,7 +41,7 @@ __pycache__/
 .venv/
 venv/
 
-data/
+/data/
 !data/README.md
 
 outputs/
