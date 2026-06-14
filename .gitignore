@@ -16,7 +16,7 @@ env/
 .DS_Store
 
 # Data and experiment outputs
-data/
+/data/
 outputs/
 checkpoints/
 logs/
