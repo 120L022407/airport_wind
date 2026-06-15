@@ -45,6 +45,7 @@ class DataSection:
     root: str
     source: str
     airports: list[str]
+    target_airports: list[str]
     input_variables: list[str]
     target_variables: list[str]
     time_resolution: str
@@ -154,6 +155,22 @@ def _validate_data_section(raw: dict[str, Any]) -> DataSection:
         raise ConfigError("data.root must be a non-empty string.")
 
     airports = _require_string_list(raw.get("airports"), "data.airports")
+    target_airports_raw = raw.get("target_airports")
+    if target_airports_raw is None:
+        target_airports = list(airports)
+    else:
+        target_airports = _require_string_list(
+            target_airports_raw,
+            "data.target_airports",
+        )
+    missing_target_airports = [
+        airport for airport in target_airports if airport not in airports
+    ]
+    if missing_target_airports:
+        raise ConfigError(
+            "data.target_airports must be a subset of data.airports: "
+            + ", ".join(missing_target_airports)
+        )
     input_variables = _require_string_list(
         raw.get("input_variables"), "data.input_variables"
     )
@@ -175,6 +192,7 @@ def _validate_data_section(raw: dict[str, Any]) -> DataSection:
         root=root,
         source=source,
         airports=airports,
+        target_airports=target_airports,
         input_variables=input_variables,
         target_variables=target_variables,
         time_resolution=time_resolution,
@@ -366,6 +384,7 @@ def _validate_timebridge_section(
             "pd_layers",
             "ca_layers",
             "stable_len",
+            "input_feature_count",
             "d_model",
             "n_heads",
             "d_ff",
@@ -392,6 +411,10 @@ def _validate_timebridge_section(
             "pd_layers": _require_model_non_negative_int(raw, "pd_layers"),
             "ca_layers": _require_model_non_negative_int(raw, "ca_layers"),
             "stable_len": _require_model_positive_int(raw, "stable_len"),
+            "input_feature_count": _require_model_positive_int(
+                raw,
+                "input_feature_count",
+            ),
             "shared_time_feature_count": _require_model_non_negative_int(
                 raw,
                 "shared_time_feature_count",
@@ -594,10 +617,15 @@ def load_config(config_path: str | Path) -> ExperimentConfig:
         shared_time_feature_count = int(
             model_section.parameters["shared_time_feature_count"]
         )
-        if shared_time_feature_count >= len(data_section.input_variables):
+        input_feature_count = int(model_section.parameters["input_feature_count"])
+        if input_feature_count != len(data_section.input_variables):
+            raise ConfigError(
+                "model.input_feature_count must match data.input_variables length."
+            )
+        if shared_time_feature_count >= input_feature_count:
             raise ConfigError(
                 "model.shared_time_feature_count must be smaller than "
-                "data.input_variables length."
+                "model.input_feature_count."
             )
 
     device = trainer_raw.get("device")

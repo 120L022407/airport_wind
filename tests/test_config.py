@@ -11,6 +11,7 @@ def test_load_baseline_config() -> None:
     config = load_config("config/gru/baseline_hourly.yaml")
     assert config.data.source == "series"
     assert config.model.name == "gru"
+    assert config.data.target_airports == ["ZGSZ"]
     assert config.model.parameters["hidden_size"] == 64
     assert config.data.input_steps == 24
     assert config.data.forecast_steps == 24
@@ -109,6 +110,53 @@ evaluation:
         encoding="utf-8",
     )
     with pytest.raises(ConfigError, match="target_variables"):
+        load_config(config_path)
+
+
+def test_config_rejects_target_airport_outside_inputs(tmp_path: Path) -> None:
+    config_path = tmp_path / "invalid_target_airport.yaml"
+    config_path.write_text(
+        """
+experiment:
+  name: invalid
+  seed: 1
+runtime:
+  output_root: outputs
+data:
+  root: data
+  source: series
+  airports: [ZGSZ]
+  target_airports: [ZGGG]
+  input_variables: [sknt]
+  target_variables: [sknt]
+  time_resolution: 1h
+  input_steps: 24
+  forecast_steps: 24
+normalization:
+  enabled: true
+  method: zscore
+  fit_split: train
+  apply_to_inputs: true
+model:
+  name: gru
+  hidden_size: 8
+  num_layers: 1
+  dropout: 0.0
+trainer:
+  device: cpu
+  batch_size: 2
+  epochs: 1
+  patience: 1
+  learning_rate: 0.001
+  weight_decay: 0.0
+  min_delta: 0.0
+evaluation:
+  metrics: [mae]
+  real_observation_only: true
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="target_airports"):
         load_config(config_path)
 
 
@@ -358,6 +406,7 @@ def _timebridge_model_block(override_line: str) -> str:
         "  pd_layers: 1",
         "  ca_layers: 1",
         "  stable_len: 6",
+        "  input_feature_count: 1",
         "  shared_time_feature_count: 0",
         "  d_model: 16",
         "  n_heads: 4",

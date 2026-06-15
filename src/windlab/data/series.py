@@ -26,6 +26,7 @@ class PreparedSeriesSplit:
     targets: FloatArray
     observed_target_mask: BoolArray
     airport_ids: list[str]
+    target_airport_ids: list[str]
     input_feature_names: list[str]
     target_feature_names: list[str]
     time_index: IntArray
@@ -61,8 +62,10 @@ def _build_split(
     *,
     split_name: str,
     array: FloatArray,
-    airport_ids: list[str],
-    airport_indices: list[int],
+    input_airport_ids: list[str],
+    input_airport_indices: list[int],
+    target_airport_ids: list[str],
+    target_airport_indices: list[int],
     input_feature_names: list[str],
     input_indices: list[int],
     target_feature_names: list[str],
@@ -70,8 +73,8 @@ def _build_split(
     original_mask: BoolArray | None,
     time_resolution: str,
 ) -> PreparedSeriesSplit:
-    selected_values = array[:, airport_indices, :][:, :, input_indices]
-    targets = array[:, airport_indices, :][:, :, target_indices]
+    selected_values = array[:, input_airport_indices, :][:, :, input_indices]
+    targets = array[:, target_airport_indices, :][:, :, target_indices]
     if original_mask is None:
         observed_mask = np.ones(targets.shape, dtype=bool)
     else:
@@ -89,7 +92,8 @@ def _build_split(
         values=selected_values.astype(np.float64, copy=False),
         targets=targets.astype(np.float64, copy=False),
         observed_target_mask=observed_mask,
-        airport_ids=airport_ids,
+        airport_ids=input_airport_ids,
+        target_airport_ids=target_airport_ids,
         input_feature_names=input_feature_names,
         target_feature_names=target_feature_names,
         time_index=time_index,
@@ -110,7 +114,12 @@ def build_series_data(config: ExperimentConfig) -> PreparedSeriesData:
     if not isinstance(airports, list) or not isinstance(variables, list):
         raise DatasetLoadError("Series metadata is missing airports or variables.")
 
-    airport_indices = _resolve_indices(airports, config.data.airports, "airports")
+    input_airport_indices = _resolve_indices(airports, config.data.airports, "airports")
+    target_airport_indices = _resolve_indices(
+        airports,
+        config.data.target_airports,
+        "target airports",
+    )
     input_indices = _resolve_indices(
         variables,
         config.data.input_variables,
@@ -139,8 +148,10 @@ def build_series_data(config: ExperimentConfig) -> PreparedSeriesData:
         train=_build_split(
             split_name="train",
             array=loaded.splits["train"],
-            airport_ids=config.data.airports,
-            airport_indices=airport_indices,
+            input_airport_ids=config.data.airports,
+            input_airport_indices=input_airport_indices,
+            target_airport_ids=config.data.target_airports,
+            target_airport_indices=target_airport_indices,
             input_feature_names=config.data.input_variables,
             input_indices=input_indices,
             target_feature_names=config.data.target_variables,
@@ -151,8 +162,10 @@ def build_series_data(config: ExperimentConfig) -> PreparedSeriesData:
         val=_build_split(
             split_name="val",
             array=loaded.splits["val"],
-            airport_ids=config.data.airports,
-            airport_indices=airport_indices,
+            input_airport_ids=config.data.airports,
+            input_airport_indices=input_airport_indices,
+            target_airport_ids=config.data.target_airports,
+            target_airport_indices=target_airport_indices,
             input_feature_names=config.data.input_variables,
             input_indices=input_indices,
             target_feature_names=config.data.target_variables,
@@ -163,8 +176,10 @@ def build_series_data(config: ExperimentConfig) -> PreparedSeriesData:
         test=_build_split(
             split_name="test",
             array=loaded.splits["test"],
-            airport_ids=config.data.airports,
-            airport_indices=airport_indices,
+            input_airport_ids=config.data.airports,
+            input_airport_indices=input_airport_indices,
+            target_airport_ids=config.data.target_airports,
+            target_airport_indices=target_airport_indices,
             input_feature_names=config.data.input_variables,
             input_indices=input_indices,
             target_feature_names=config.data.target_variables,

@@ -18,13 +18,18 @@ def test_build_windows_keeps_splits_separate(tmp_path: Path) -> None:
     config = load_config("config/gru/baseline_hourly.yaml")
 
     prepared = build_series_data(config)
+    assert prepared.train.values.shape == (72, 4, 13)
+    assert prepared.train.targets.shape == (72, 1, 1)
+    assert prepared.train.target_airport_ids == ["ZGSZ"]
     windowed = build_windowed_data(prepared, config)
 
     expected_train_samples = 72 - 24 - 24 + 1
     assert windowed.train.inputs.shape == (expected_train_samples, 24, 4, 13)
-    assert windowed.train.targets.shape == (expected_train_samples, 24, 4, 1)
+    assert windowed.train.targets.shape == (expected_train_samples, 24, 1, 1)
     assert windowed.val.sample_ids[0] == "val-00000"
     assert windowed.train.target_time_index[0, 0] == 24
+    assert windowed.train.airport_ids == ["ZGSZ", "ZGGG", "VHHH", "VMMC"]
+    assert windowed.train.target_airport_ids == ["ZGSZ"]
     assert np.all(windowed.train.observed_target_mask)
 
 
@@ -42,6 +47,7 @@ data:
   root: {data_root}
   source: series_15min
   airports: [ZGSZ, ZGGG, VHHH, VMMC]
+  target_airports: [ZGSZ]
   input_variables: [sknt]
   target_variables: [sknt]
   time_resolution: 15min

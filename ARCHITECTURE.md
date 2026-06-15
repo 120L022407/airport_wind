@@ -118,6 +118,8 @@ The baseline uses PyTorch and remains CPU-friendly for local smoke tests:
   `[batch, forecast_steps, airport, target]`;
 - `torch.nn.GRU` encodes `[batch, input_steps, airport * feature]`;
 - a projection head maps the final hidden state to all forecast steps;
+- the current baseline config keeps four-airport inputs but targets only
+  `ZGSZ`, so the baseline output shape is `[batch, 24, 1, 1]`;
 - local tests use synthetic data and a small CPU run.
 
 This is a real trainable baseline and not a claim of state-of-the-art modeling.

@@ -142,7 +142,7 @@ class Evaluator:
                     targets=windowed.test.targets,
                     target_timestamps=windowed.test.target_time_index,
                     output_dir=self.run_dir / "figures",
-                    airport_labels=windowed.test.airport_ids,
+                    airport_labels=windowed.test.target_airport_ids,
                     target_name=windowed.test.target_feature_names[0],
                 )
             ],

@@ -393,6 +393,7 @@ class TimeBridgeModel(nn.Module):
         pd_layers: int,
         ca_layers: int,
         stable_len: int,
+        input_feature_count: int,
         shared_time_feature_count: int,
         d_model: int,
         n_heads: int,
@@ -406,9 +407,11 @@ class TimeBridgeModel(nn.Module):
             raise ValueError("input_size must be divisible by airport_count.")
         if input_steps % period != 0:
             raise ValueError("input_steps must be divisible by period.")
+        if input_size % input_feature_count != 0:
+            raise ValueError("input_size must be divisible by input_feature_count.")
         if shared_time_feature_count < 0:
             raise ValueError("shared_time_feature_count must be non-negative.")
-        feature_count = input_size // airport_count
+        feature_count = input_feature_count
         if shared_time_feature_count >= feature_count:
             raise ValueError(
                 "shared_time_feature_count must be smaller than "
@@ -431,6 +434,7 @@ class TimeBridgeModel(nn.Module):
         self.pd_layers = pd_layers
         self.ca_layers = ca_layers
         self.stable_len = stable_len
+        self.input_feature_count = input_feature_count
         self.shared_time_feature_count = shared_time_feature_count
         self.d_model = d_model
         self.n_heads = n_heads
@@ -439,8 +443,9 @@ class TimeBridgeModel(nn.Module):
         self.attn_dropout = attn_dropout
         self.activation = activation
         self.feature_count = feature_count
+        self.input_airport_count = input_size // input_feature_count
         self.signal_feature_count = feature_count - shared_time_feature_count
-        self.signal_channel_count = airport_count * self.signal_feature_count
+        self.signal_channel_count = self.input_airport_count * self.signal_feature_count
         self.total_channel_count = self.signal_channel_count + shared_time_feature_count
         self.input_patch_count = input_patch_count
         self.output_patch_count = input_patch_count if pd_layers == 0 else num_p
@@ -475,6 +480,7 @@ class TimeBridgeModel(nn.Module):
             "pd_layers": self.pd_layers,
             "ca_layers": self.ca_layers,
             "stable_len": self.stable_len,
+            "input_feature_count": self.input_feature_count,
             "shared_time_feature_count": self.shared_time_feature_count,
             "d_model": self.d_model,
             "n_heads": self.n_heads,

@@ -8,6 +8,8 @@ prediction: [batch, forecast_steps, airport, target]
 ```
 
 The current baseline task uses `[batch, 24, 4, 13] -> [batch, 24, 4, 1]`.
+The current baseline configuration keeps four-airport inputs and predicts
+Shenzhen-only targets: `[batch, 24, 4, 13] -> [batch, 24, 1, 1]`.
 
 ## GRU
 

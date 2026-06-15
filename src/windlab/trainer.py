@@ -182,7 +182,7 @@ class Trainer:
             input_size=windowed.train.inputs.shape[2] * windowed.train.inputs.shape[3],
             input_steps=windowed.train.inputs.shape[1],
             forecast_steps=self.config.data.forecast_steps,
-            airport_count=len(self.config.data.airports),
+            airport_count=windowed.train.targets.shape[2],
             target_size=len(self.config.data.target_variables),
             **self.config.model.parameters,
         )

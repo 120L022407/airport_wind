@@ -9,6 +9,7 @@ data:
   root: ${AIRPORT_WIND_DATA_ROOT:-data}
   source: series
   airports: [ZGSZ, ZGGG, VHHH, VMMC]
+  target_airports: [ZGSZ]
   input_variables:
     [
       sknt,
@@ -47,7 +48,7 @@ model:
   stride: 3
 
 trainer:
-  device: cpu
+  device: cuda
   batch_size: 64
   epochs: 50
   patience: 8

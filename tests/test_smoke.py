@@ -23,6 +23,7 @@ data:
   root: {data_root}
   source: series
   airports: [ZGSZ, ZGGG, VHHH, VMMC]
+  target_airports: [ZGSZ]
   input_variables:
     [
       sknt,
@@ -109,6 +110,7 @@ data:
   root: {data_root}
   source: series
   airports: [ZGSZ, ZGGG, VHHH, VMMC]
+  target_airports: [ZGSZ]
   input_variables: [sknt]
   target_variables: [sknt]
   time_resolution: 1h
@@ -190,6 +192,7 @@ data:
   root: {data_root}
   source: series
   airports: [ZGSZ, ZGGG, VHHH, VMMC]
+  target_airports: [ZGSZ]
   input_variables:
     [
       sknt,
@@ -223,6 +226,7 @@ model:
   pd_layers: 1
   ca_layers: 1
   stable_len: 6
+  input_feature_count: 13
   shared_time_feature_count: 5
   d_model: 16
   n_heads: 4

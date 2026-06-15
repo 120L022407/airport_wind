@@ -26,6 +26,7 @@ class WindowedSplit:
     input_time_index: IntArray
     target_time_index: IntArray
     airport_ids: list[str]
+    target_airport_ids: list[str]
     input_feature_names: list[str]
     target_feature_names: list[str]
 
@@ -59,6 +60,7 @@ def _build_windowed_split(
 
     airport_count = split.values.shape[1]
     feature_count = split.values.shape[2]
+    target_airport_count = split.targets.shape[1]
     target_feature_count = split.targets.shape[2]
 
     inputs = np.zeros(
@@ -66,11 +68,11 @@ def _build_windowed_split(
         dtype=np.float64,
     )
     targets = np.zeros(
-        (sample_count, forecast_steps, airport_count, target_feature_count),
+        (sample_count, forecast_steps, target_airport_count, target_feature_count),
         dtype=np.float64,
     )
     masks = np.zeros(
-        (sample_count, forecast_steps, airport_count, target_feature_count),
+        (sample_count, forecast_steps, target_airport_count, target_feature_count),
         dtype=bool,
     )
     input_time_index = np.zeros((sample_count, input_steps), dtype=np.int64)
@@ -96,6 +98,7 @@ def _build_windowed_split(
         input_time_index=input_time_index,
         target_time_index=target_time_index,
         airport_ids=list(split.airport_ids),
+        target_airport_ids=list(split.target_airport_ids),
         input_feature_names=list(split.input_feature_names),
         target_feature_names=list(split.target_feature_names),
     )
