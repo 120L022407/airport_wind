@@ -6,6 +6,10 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-outputs}"
 RUN_EVALUATION="${RUN_EVALUATION:-1}"
 
+# 默认使用物理 4 号 GPU 
+GPU_ID="${GPU_ID:-4}" 
+export CUDA_VISIBLE_DEVICES="${GPU_ID}"
+
 BASELINE_CONFIGS=(
   "config/gru/baseline_hourly.yaml"
   "config/patchtst/baseline_hourly.yaml"
