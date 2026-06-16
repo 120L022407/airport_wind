@@ -141,6 +141,7 @@ class Evaluator:
                     predictions=test_prediction.astype(np.float64, copy=False),
                     targets=windowed.test.targets,
                     target_timestamps=windowed.test.target_time_index,
+                    observed_target_mask=test_mask,
                     output_dir=self.run_dir / "figures",
                     airport_labels=windowed.test.target_airport_ids,
                     target_name=windowed.test.target_feature_names[0],

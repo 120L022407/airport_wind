@@ -23,6 +23,7 @@ from matplotlib import pyplot as plt  # noqa: E402
 
 FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.integer[Any]]
+BoolArray = NDArray[np.bool_]
 
 DEFAULT_LEADS = (1, 6, 12, 24)
 DEFAULT_FIRST_N = 300
@@ -38,6 +39,7 @@ class FixedLeadSeries:
     times: NDArray[np.generic]
     predictions: FloatArray
     targets: FloatArray
+    observed_mask: BoolArray | None = None
 
 
 def build_fixed_lead_series(
@@ -46,11 +48,13 @@ def build_fixed_lead_series(
     targets: FloatArray,
     lead: int,
     target_timestamps: NDArray[np.generic] | None = None,
+    observed_target_mask: BoolArray | None = None,
     target_index: int = 0,
 ) -> FixedLeadSeries:
     """Extract a continuous fixed-lead series without flattening horizons."""
 
     _validate_prediction_target_shapes(predictions, targets)
+    _validate_observed_mask_shape(observed_target_mask, predictions)
     lead_index = lead - 1
     if lead_index < 0 or lead_index >= predictions.shape[1]:
         raise ReportingError(
@@ -64,6 +68,9 @@ def build_fixed_lead_series(
 
     fixed_predictions = predictions[:, lead_index, :, target_index]
     fixed_targets = targets[:, lead_index, :, target_index]
+    fixed_observed_mask = None
+    if observed_target_mask is not None:
+        fixed_observed_mask = observed_target_mask[:, lead_index, :, target_index]
     times = _select_times(
         target_timestamps=target_timestamps,
         lead_index=lead_index,
@@ -81,6 +88,9 @@ def build_fixed_lead_series(
         times=times,
         predictions=fixed_predictions.copy(),
         targets=fixed_targets.copy(),
+        observed_mask=(
+            None if fixed_observed_mask is None else fixed_observed_mask.copy()
+        ),
     )
 
 
@@ -90,6 +100,7 @@ def save_test_prediction_figures(
     targets: FloatArray,
     output_dir: str | Path,
     target_timestamps: NDArray[np.generic] | None = None,
+    observed_target_mask: BoolArray | None = None,
     airport_labels: Sequence[str] | None = None,
     target_name: str = "wind_speed",
     leads: Sequence[int] = DEFAULT_LEADS,
@@ -100,6 +111,7 @@ def save_test_prediction_figures(
     figure_dir = Path(output_dir)
     figure_dir.mkdir(parents=True, exist_ok=True)
     _validate_prediction_target_shapes(predictions, targets)
+    _validate_observed_mask_shape(observed_target_mask, predictions)
     airport_count = predictions.shape[2]
     labels = _airport_labels(airport_labels, airport_count)
 
@@ -110,6 +122,7 @@ def save_test_prediction_figures(
             targets=targets,
             lead=lead,
             target_timestamps=target_timestamps,
+            observed_target_mask=observed_target_mask,
         )
         full_path = figure_dir / f"test_predictions_lead_{lead}_full.png"
         _plot_fixed_lead_series(
@@ -152,6 +165,23 @@ def _validate_prediction_target_shapes(
         )
     if predictions.shape[0] == 0:
         raise ReportingError("Cannot plot empty prediction arrays.")
+
+
+def _validate_observed_mask_shape(
+    observed_target_mask: BoolArray | None,
+    predictions: FloatArray,
+) -> None:
+    if observed_target_mask is None:
+        return
+    if observed_target_mask.ndim != 4:
+        raise ReportingError(
+            "observed_target_mask must have shape [window, horizon, airport, target]."
+        )
+    if observed_target_mask.shape != predictions.shape:
+        raise ReportingError(
+            f"observed_target_mask shape {observed_target_mask.shape} does not match "
+            f"predictions shape {predictions.shape}."
+        )
 
 
 def _select_times(
@@ -208,13 +238,7 @@ def _plot_fixed_lead_series(
     view_label: str,
     max_points: int | None,
 ) -> None:
-    point_count = (
-        len(series.times) if max_points is None else min(max_points, len(series.times))
-    )
-    times = series.times[:point_count]
-    predictions = series.predictions[:point_count]
-    targets = series.targets[:point_count]
-    airport_count = predictions.shape[1]
+    airport_count = series.predictions.shape[1]
 
     fig_height = max(3.0, 2.4 * airport_count)
     fig, axes = plt.subplots(
@@ -225,22 +249,52 @@ def _plot_fixed_lead_series(
         squeeze=False,
     )
     for airport_index, axis in enumerate(axes[:, 0]):
-        axis.plot(times, targets[:, airport_index], label="Observed", linewidth=1.2)
-        axis.plot(
-            times,
-            predictions[:, airport_index],
-            label="Prediction",
-            linewidth=1.2,
-        )
+        airport_times = series.times
+        airport_predictions = series.predictions[:, airport_index]
+        airport_targets = series.targets[:, airport_index]
+
+        if series.observed_mask is not None:
+            airport_mask = series.observed_mask[:, airport_index]
+            airport_times = airport_times[airport_mask]
+            airport_predictions = airport_predictions[airport_mask]
+            airport_targets = airport_targets[airport_mask]
+
+        if max_points is not None:
+            airport_times = airport_times[:max_points]
+            airport_predictions = airport_predictions[:max_points]
+            airport_targets = airport_targets[:max_points]
+
+        if len(airport_times) > 0:
+            axis.plot(
+                airport_times,
+                airport_targets,
+                label="Observed",
+                linewidth=1.2,
+            )
+            axis.plot(
+                airport_times,
+                airport_predictions,
+                label="Prediction",
+                linewidth=1.2,
+            )
+            axis.legend(loc="best")
+        else:
+            axis.text(
+                0.5,
+                0.5,
+                "No observed points",
+                ha="center",
+                va="center",
+                transform=axis.transAxes,
+            )
         axis.set_ylabel("Wind speed (m/s)")
         axis.set_title(str(airport_labels[airport_index]))
         axis.grid(True, alpha=0.25)
-        axis.legend(loc="best")
 
     lead_label = f"{series.lead}h"
     fig.suptitle(f"Test predictions lead {lead_label} - {view_label} - {target_name}")
-    axes[-1, 0].set_xlabel(_x_label(times))
-    if _is_datetime_like(times):
+    axes[-1, 0].set_xlabel(_x_label(series.times))
+    if _is_datetime_like(series.times):
         fig.autofmt_xdate()
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)

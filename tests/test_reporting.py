@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pytest
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
 
 from windlab.reporting import (
@@ -78,6 +80,31 @@ def test_fixed_lead_series_uses_requested_horizon_slice() -> None:
     assert np.array_equal(series.times, timestamps[:, 5])
 
 
+def test_fixed_lead_series_uses_requested_mask_slice() -> None:
+    predictions, targets, timestamps = _arrays(window_count=4)
+    observed_mask = np.ones_like(predictions, dtype=bool)
+    observed_mask[:, 5, :, 0] = np.array(
+        [
+            [True, False, True, False],
+            [False, True, False, True],
+            [True, True, False, False],
+            [False, False, True, True],
+        ],
+        dtype=bool,
+    )
+
+    series = build_fixed_lead_series(
+        predictions=predictions,
+        targets=targets,
+        target_timestamps=timestamps,
+        observed_target_mask=observed_mask,
+        lead=6,
+    )
+
+    assert series.observed_mask is not None
+    assert np.array_equal(series.observed_mask, observed_mask[:, 5, :, 0])
+
+
 def test_save_test_prediction_figures_handles_less_than_300_points(
     tmp_path: Path,
 ) -> None:
@@ -92,6 +119,54 @@ def test_save_test_prediction_figures_handles_less_than_300_points(
 
     assert len(paths) == 8
     assert all(path.is_file() for path in paths)
+
+
+def test_save_test_prediction_figures_filters_to_observed_points(
+    tmp_path: Path,
+) -> None:
+    predictions, targets, timestamps = _arrays(
+        window_count=5,
+        airport_count=1,
+    )
+    observed_mask = np.zeros_like(predictions, dtype=bool)
+    observed_mask[:, 0, 0, 0] = np.array([True, False, True, True, False], dtype=bool)
+
+    plot_calls: list[tuple[NDArray[np.int64], NDArray[np.float64], str | None]] = []
+    original_plot = Axes.plot
+
+    def spy_plot(self: Axes, *args: object, **kwargs: object) -> object:
+        plot_calls.append(
+            (
+                np.asarray(args[0], dtype=np.int64).copy(),
+                np.asarray(args[1], dtype=np.float64).copy(),
+                kwargs.get("label") if isinstance(kwargs.get("label"), str) else None,
+            )
+        )
+        return original_plot(self, *args, **kwargs)
+
+    with patch.object(Axes, "plot", new=spy_plot):
+        save_test_prediction_figures(
+            predictions=predictions,
+            targets=targets,
+            target_timestamps=timestamps,
+            observed_target_mask=observed_mask,
+            output_dir=tmp_path / "figures",
+            airport_labels=["ZGSZ"],
+            leads=[1],
+        )
+
+    observed_calls = [call for call in plot_calls if call[2] == "Observed"]
+    prediction_calls = [call for call in plot_calls if call[2] == "Prediction"]
+    expected_times = np.array([0, 48, 72], dtype=np.int64)
+    expected_targets = targets[[0, 2, 3], 0, 0, 0]
+    expected_predictions = predictions[[0, 2, 3], 0, 0, 0]
+
+    assert len(observed_calls) == 2
+    assert len(prediction_calls) == 2
+    assert np.array_equal(observed_calls[0][0], expected_times)
+    assert np.array_equal(observed_calls[0][1], expected_targets)
+    assert np.array_equal(prediction_calls[0][0], expected_times)
+    assert np.array_equal(prediction_calls[0][1], expected_predictions)
 
 
 def test_fixed_lead_series_rejects_timestamp_length_mismatch() -> None:

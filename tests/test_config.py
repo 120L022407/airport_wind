@@ -17,24 +17,39 @@ def test_load_baseline_config() -> None:
     assert config.data.forecast_steps == 24
 
 
+def test_load_gru_15min_config() -> None:
+    config = load_config("config/gru/baseline_15min.yaml")
+    assert config.data.source == "series_15min"
+    assert config.data.time_resolution == "15min"
+    assert config.data.target_airports == ["ZGSZ"]
+    assert config.data.input_steps == 96
+    assert config.data.forecast_steps == 96
+    assert config.trainer.batch_size == 32
+
+
 @pytest.mark.parametrize(
-    ("config_path", "model_name"),
+    ("config_path", "model_name", "expected_steps"),
     [
-        ("config/patchtst/baseline_hourly.yaml", "patchtst"),
-        ("config/itransformer/baseline_hourly.yaml", "itransformer"),
-        ("config/dlinear/baseline_hourly.yaml", "dlinear"),
-        ("config/tfps/baseline_hourly.yaml", "tfps"),
-        ("config/tfps/time_only_hourly.yaml", "tfps"),
-        ("config/tfps/no_pattern_experts_hourly.yaml", "tfps"),
-        ("config/timebridge/baseline_hourly.yaml", "timebridge"),
-        ("config/timebridge/no_cointegration_hourly.yaml", "timebridge"),
+        ("config/gru/baseline_15min.yaml", "gru", 96),
+        ("config/patchtst/baseline_hourly.yaml", "patchtst", 24),
+        ("config/itransformer/baseline_hourly.yaml", "itransformer", 24),
+        ("config/dlinear/baseline_hourly.yaml", "dlinear", 24),
+        ("config/tfps/baseline_hourly.yaml", "tfps", 24),
+        ("config/tfps/time_only_hourly.yaml", "tfps", 24),
+        ("config/tfps/no_pattern_experts_hourly.yaml", "tfps", 24),
+        ("config/timebridge/baseline_hourly.yaml", "timebridge", 24),
+        ("config/timebridge/no_cointegration_hourly.yaml", "timebridge", 24),
     ],
 )
-def test_load_additional_model_configs(config_path: str, model_name: str) -> None:
+def test_load_additional_model_configs(
+    config_path: str,
+    model_name: str,
+    expected_steps: int,
+) -> None:
     config = load_config(config_path)
     assert config.model.name == model_name
-    assert config.data.input_steps == 24
-    assert config.data.forecast_steps == 24
+    assert config.data.input_steps == expected_steps
+    assert config.data.forecast_steps == expected_steps
 
 
 def test_config_rejects_non_train_normalization(tmp_path: Path) -> None:
