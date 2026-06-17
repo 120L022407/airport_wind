@@ -13,8 +13,15 @@ import yaml
 SUPPORTED_SOURCES = {"series", "series_15min", "EC"}
 SUPPORTED_NORMALIZATION_METHODS = {"zscore"}
 SUPPORTED_FIT_SPLITS = {"train"}
+SUPPORTED_LOSSES = {"composite"}
+SUPPORTED_LOSS_TERMS = {
+    "mse",
+    "hcan_auxiliary",
+    "fourier_amplitude_correlation",
+}
 SUPPORTED_MODELS = {
     "gru",
+    "hcan",
     "patchtst",
     "itransformer",
     "dlinear",
@@ -68,6 +75,19 @@ class ModelSection:
 
 
 @dataclass(frozen=True)
+class LossTermSection:
+    name: str
+    weight: float
+    params: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class LossSection:
+    name: str
+    terms: list[LossTermSection]
+
+
+@dataclass(frozen=True)
 class TrainerSection:
     device: str
     batch_size: int
@@ -90,6 +110,7 @@ class ExperimentConfig:
     runtime: RuntimeSection
     data: DataSection
     normalization: NormalizationSection
+    loss: LossSection
     model: ModelSection
     trainer: TrainerSection
     evaluation: EvaluationSection
@@ -143,6 +164,12 @@ def _require_positive_int(value: Any, field_name: str) -> int:
     if not isinstance(value, int) or value <= 0:
         raise ConfigError(f"{field_name} must be a positive integer.")
     return value
+
+
+def _require_non_negative_float(value: Any, field_name: str) -> float:
+    if not isinstance(value, (int, float)) or float(value) < 0.0:
+        raise ConfigError(f"{field_name} must be a non-negative float.")
+    return float(value)
 
 
 def _validate_data_section(raw: dict[str, Any]) -> DataSection:
@@ -231,6 +258,91 @@ def _validate_normalization_section(raw: dict[str, Any]) -> NormalizationSection
     )
 
 
+def _validate_fourier_loss_params(raw: dict[str, Any]) -> dict[str, Any]:
+    unknown_fields = sorted(set(raw) - {"mode", "alpha"})
+    if unknown_fields:
+        raise ConfigError(
+            "loss term 'fourier_amplitude_correlation' does not support fields: "
+            + ", ".join(unknown_fields)
+        )
+    mode = raw.get("mode")
+    if not isinstance(mode, str) or mode not in {"paper_random", "fal", "fcl"}:
+        raise ConfigError(
+            "loss.term.params.mode must be one of ['fal', 'fcl', 'paper_random']."
+        )
+    if mode == "paper_random":
+        alpha = raw.get("alpha")
+        if not isinstance(alpha, (int, float)) or not 0.0 <= float(alpha) <= 1.0:
+            raise ConfigError("loss.term.params.alpha must be in [0.0, 1.0].")
+        return {"mode": mode, "alpha": float(alpha)}
+    if "alpha" in raw:
+        raise ConfigError(
+            "loss.term.params.alpha is only valid when mode='paper_random'."
+        )
+    return {"mode": mode}
+
+
+def _validate_loss_term(raw: Any, index: int) -> LossTermSection:
+    field_name = f"loss.terms[{index}]"
+    mapping = _require_mapping(raw, field_name)
+    unknown_fields = sorted(set(mapping) - {"name", "weight", "params"})
+    if unknown_fields:
+        raise ConfigError(
+            f"{field_name} does not support fields: " + ", ".join(unknown_fields)
+        )
+    name = mapping.get("name")
+    if not isinstance(name, str) or name not in SUPPORTED_LOSS_TERMS:
+        raise ConfigError(
+            f"{field_name}.name must be one of {sorted(SUPPORTED_LOSS_TERMS)}."
+        )
+    weight = _require_non_negative_float(mapping.get("weight"), f"{field_name}.weight")
+    params_raw = mapping.get("params", {})
+    params = _require_mapping(params_raw, f"{field_name}.params")
+    if name in {"mse", "hcan_auxiliary"}:
+        if params:
+            raise ConfigError(f"{field_name}.params must be empty for loss {name!r}.")
+        return LossTermSection(name=name, weight=weight, params={})
+    return LossTermSection(
+        name=name,
+        weight=weight,
+        params=_validate_fourier_loss_params(params),
+    )
+
+
+def _default_loss_section() -> LossSection:
+    return LossSection(
+        name="composite",
+        terms=[LossTermSection(name="mse", weight=1.0, params={})],
+    )
+
+
+def _validate_loss_section(raw: Any) -> LossSection:
+    if raw is None:
+        return _default_loss_section()
+    mapping = _require_mapping(raw, "loss")
+    unknown_fields = sorted(set(mapping) - {"name", "terms"})
+    if unknown_fields:
+        raise ConfigError("loss does not support fields: " + ", ".join(unknown_fields))
+    name = mapping.get("name")
+    if not isinstance(name, str) or name not in SUPPORTED_LOSSES:
+        raise ConfigError(f"loss.name must be one of {sorted(SUPPORTED_LOSSES)}.")
+    terms_raw = mapping.get("terms")
+    if not isinstance(terms_raw, list) or not terms_raw:
+        raise ConfigError("loss.terms must be a non-empty list.")
+    terms = [
+        _validate_loss_term(term_raw, index) for index, term_raw in enumerate(terms_raw)
+    ]
+    term_names = {term.name for term in terms if term.weight > 0.0}
+    if "mse" in term_names and "hcan_auxiliary" in term_names:
+        raise ConfigError(
+            "loss.terms must not combine 'mse' with 'hcan_auxiliary' because "
+            "hcan_auxiliary already includes the direct forecast term."
+        )
+    if not any(term.weight > 0.0 for term in terms):
+        raise ConfigError("loss.terms must contain at least one positive-weight term.")
+    return LossSection(name=name, terms=terms)
+
+
 def _require_model_positive_int(raw: dict[str, Any], field_name: str) -> int:
     return _require_positive_int(raw.get(field_name), f"model.{field_name}")
 
@@ -259,6 +371,13 @@ def _require_model_positive_float(raw: dict[str, Any], field_name: str) -> float
     value = raw.get(field_name)
     if not isinstance(value, (int, float)) or float(value) <= 0.0:
         raise ConfigError(f"model.{field_name} must be a positive float.")
+    return float(value)
+
+
+def _require_model_non_negative_float(raw: dict[str, Any], field_name: str) -> float:
+    value = raw.get(field_name)
+    if not isinstance(value, (int, float)) or float(value) < 0.0:
+        raise ConfigError(f"model.{field_name} must be a non-negative float.")
     return float(value)
 
 
@@ -439,6 +558,59 @@ def _validate_timebridge_section(
     )
 
 
+def _validate_hcan_section(raw: dict[str, Any]) -> ModelSection:
+    _reject_unknown_model_fields(
+        raw,
+        {
+            "name",
+            "backbone_hidden_size",
+            "backbone_num_layers",
+            "backbone_dropout",
+            "hidden_dim",
+            "num_coarse",
+            "num_fine",
+            "lambda_cls",
+            "lambda_reg",
+            "lambda_acl",
+            "lambda_direct",
+        },
+        "hcan",
+    )
+    num_coarse = _require_model_positive_int(raw, "num_coarse")
+    num_fine = _require_model_positive_int(raw, "num_fine")
+    if num_fine != 2 * num_coarse:
+        raise ConfigError("model.num_fine must equal 2 * model.num_coarse.")
+    return ModelSection(
+        name="hcan",
+        parameters={
+            "backbone_hidden_size": _require_model_positive_int(
+                raw,
+                "backbone_hidden_size",
+            ),
+            "backbone_num_layers": _require_model_positive_int(
+                raw,
+                "backbone_num_layers",
+            ),
+            "backbone_dropout": _require_model_float_range(
+                raw,
+                "backbone_dropout",
+                minimum=0.0,
+                maximum=1.0,
+            ),
+            "hidden_dim": _require_model_positive_int(raw, "hidden_dim"),
+            "num_coarse": num_coarse,
+            "num_fine": num_fine,
+            "lambda_cls": _require_model_non_negative_float(raw, "lambda_cls"),
+            "lambda_reg": _require_model_non_negative_float(raw, "lambda_reg"),
+            "lambda_acl": _require_model_non_negative_float(raw, "lambda_acl"),
+            "lambda_direct": _require_model_non_negative_float(
+                raw,
+                "lambda_direct",
+            ),
+        },
+    )
+
+
 def _validate_model_section(raw: dict[str, Any]) -> ModelSection:
     model_name = raw.get("name")
     if not isinstance(model_name, str) or not model_name:
@@ -473,6 +645,8 @@ def _validate_model_section(raw: dict[str, Any]) -> ModelSection:
                 ),
             },
         )
+    if model_name == "hcan":
+        return _validate_hcan_section(raw)
     if model_name == "patchtst":
         _reject_unknown_model_fields(
             raw,
@@ -553,6 +727,7 @@ def load_config(config_path: str | Path) -> ExperimentConfig:
     runtime_raw = _require_mapping(raw_yaml.get("runtime"), "runtime")
     data_raw = _require_mapping(raw_yaml.get("data"), "data")
     normalization_raw = _require_mapping(raw_yaml.get("normalization"), "normalization")
+    loss_raw = raw_yaml.get("loss")
     model_raw = _require_mapping(raw_yaml.get("model"), "model")
     trainer_raw = _require_mapping(raw_yaml.get("trainer"), "trainer")
     evaluation_raw = _require_mapping(raw_yaml.get("evaluation"), "evaluation")
@@ -570,6 +745,7 @@ def load_config(config_path: str | Path) -> ExperimentConfig:
 
     data_section = _validate_data_section(data_raw)
     normalization_section = _validate_normalization_section(normalization_raw)
+    loss_section = _validate_loss_section(loss_raw)
     model_section = _validate_model_section(model_raw)
     if (
         model_section.name == "patchtst"
@@ -657,6 +833,7 @@ def load_config(config_path: str | Path) -> ExperimentConfig:
         runtime=RuntimeSection(output_root=output_root),
         data=data_section,
         normalization=normalization_section,
+        loss=loss_section,
         model=model_section,
         trainer=TrainerSection(
             device=device,

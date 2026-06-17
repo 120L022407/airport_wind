@@ -12,7 +12,7 @@ import torch
 from numpy.typing import NDArray
 from torch import nn
 from torch.utils.data import DataLoader
-from tqdm.auto import tqdm
+from tqdm.auto import tqdm  # type: ignore[import-untyped]
 
 from windlab.config import ExperimentConfig, load_config
 from windlab.data.normalization import apply_normalization, load_normalization_state

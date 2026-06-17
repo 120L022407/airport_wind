@@ -101,6 +101,42 @@ Available ablations:
 - `config/tfps/no_pattern_experts_hourly.yaml`: keeps dual-domain encoders but
   disables pattern identifier and pattern experts.
 
+## HCAN
+
+Faithful core, following "Hierarchical Classification Auxiliary Network for
+Time Series Forecasting":
+
+- predicts the forecast horizon together with coarse and fine hierarchical
+  interval heads;
+- uses uncertainty-aware classification on the hierarchical logits with a
+  Dirichlet evidence formulation;
+- regresses relative offsets within the predicted coarse and fine intervals;
+- adds hierarchical consistency regularization between coarse logits and the
+  adjacent-pair reduction of fine logits;
+- applies the hierarchical attention aggregation block before the direct
+  forecast head.
+
+Project adaptation:
+
+- the released HCAN code wraps several backbone forecasters; this framework does
+  not expose a generic backbone feature-map interface yet, so the current HCAN
+  module uses an internal GRU backbone to produce the per-channel forecast
+  sequence consumed by the HCAN heads;
+- hierarchy boundaries are fitted only from training targets, and only from
+  train-split observed points when an observation mask is available;
+- the framework's existing masked supervision contract is preserved, so HCAN's
+  direct loss, hierarchical classification loss, relative regression loss, and
+  consistency loss are all applied only on active target points;
+- no paper-specific Trainer, Dataset, or evaluation path is added; auxiliary
+  tensors travel through the existing `aux` contract.
+
+Available ablations:
+
+- `config/hcan/baseline_hourly.yaml`: direct loss + hierarchical uncertainty
+  losses + relative regression + hierarchical consistency;
+- `config/hcan/no_hcl_hourly.yaml`: disables the hierarchical consistency term
+  by setting `lambda_acl: 0.0`.
+
 ## TimeBridge
 
 Faithful core, following "TimeBridge: Non-Stationarity Matters for Long-term

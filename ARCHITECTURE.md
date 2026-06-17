@@ -15,8 +15,17 @@ Future support for `series_15min`, `EC`, additional models, and richer metrics
 must extend the existing interfaces instead of adding copied entry points or
 experiment-specific trainers.
 
+Current experiment default for new training runs and model comparisons:
+
+- data source: `series_15min`;
+- task: past 24 hours to next 24 hours;
+- operational config shape: `input_steps=96`, `forecast_steps=96`;
+- target airport: `ZGSZ`.
+
 Implemented model backbones and their project adaptations are documented in
 `docs/models.md`.
+Implemented reusable training losses and their project adaptations are
+documented in `docs/losses.md`.
 
 ## Repository structure
 
@@ -75,6 +84,7 @@ Each experiment is self-contained and must define:
 - selected airports, variables, and targets;
 - input and forecast lengths;
 - normalization behavior;
+- loss settings;
 - model settings;
 - evaluation metrics and mask behavior;
 - runtime output settings.
@@ -82,6 +92,9 @@ Each experiment is self-contained and must define:
 Deep inheritance is intentionally avoided. Shell wrappers may select a config
 file and override operational settings such as output location, but not define a
 second configuration system.
+
+Unless a task explicitly requests otherwise, prefer `series_15min` baselines
+over hourly baselines when adding new experiment configs or launch scripts.
 
 ## Dependency boundaries
 

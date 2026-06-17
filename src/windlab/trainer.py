@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import shutil
 from collections.abc import Callable
 from dataclasses import asdict, replace
@@ -13,7 +14,7 @@ import torch
 from numpy.typing import NDArray
 from torch import nn
 from torch.utils.data import DataLoader
-from tqdm.auto import tqdm
+from tqdm.auto import tqdm  # type: ignore[import-untyped]
 
 from windlab.config import ExperimentConfig, load_config
 from windlab.data.normalization import (
@@ -26,7 +27,7 @@ from windlab.data.series import PreparedSeriesData, PreparedSeriesSplit
 from windlab.data.torch_dataset import WindowedTorchDataset
 from windlab.data.windows import WindowedData, WindowedSplit, build_windowed_data
 from windlab.metrics import compute_metrics
-from windlab.registry import DATA_BUILDERS, LOSSES, MODELS
+from windlab.registry import DATA_BUILDERS, MODELS
 from windlab.utils import (
     create_run_dir,
     dump_json,
@@ -40,7 +41,7 @@ from . import models  # noqa: F401
 from .data import series as _series_module  # noqa: F401
 
 DataBuilderFn = Callable[[ExperimentConfig], PreparedSeriesData]
-LossFn = Callable[[torch.Tensor, torch.Tensor, torch.Tensor | None], torch.Tensor]
+LossFn = Callable[[Any, torch.Tensor, torch.Tensor | None], torch.Tensor]
 FloatArray = NDArray[np.float64]
 
 
@@ -50,7 +51,7 @@ class Trainer:
     def __init__(self, config: ExperimentConfig) -> None:
         self.config = config
         self.device = self._resolve_device(config.trainer.device)
-        self.loss_fn = cast(LossFn, LOSSES.get("mse"))
+        self.loss_fn: LossFn | None = None
 
     def fit(self, output_root_override: str | None = None) -> Path:
         set_seed(self.config.experiment.seed)
@@ -62,6 +63,20 @@ class Trainer:
         normalization_state = self._build_normalization_state(prepared)
         normalized_prepared = self._apply_normalization(prepared, normalization_state)
         windowed = build_windowed_data(normalized_prepared, self.config)
+        steps_per_epoch = max(
+            1,
+            math.ceil(windowed.train.inputs.shape[0] / self.config.trainer.batch_size),
+        )
+        self.loss_fn = cast(
+            LossFn,
+            _losses_module.build_forecast_loss(
+                self.config.loss,
+                train_targets=windowed.train.targets,
+                train_mask=windowed.train.observed_target_mask,
+                annealing_steps=self.config.trainer.epochs,
+                total_train_steps=self.config.trainer.epochs * steps_per_epoch,
+            ),
+        )
 
         model = self._build_model(windowed).to(self.device)
         optimizer = torch.optim.Adam(
@@ -170,6 +185,8 @@ class Trainer:
         epoch: int,
     ) -> float:
         model.train()
+        if self.loss_fn is None:
+            raise RuntimeError("Loss function is not initialized.")
         losses: list[float] = []
         batch_bar = tqdm(
             train_loader,
@@ -185,7 +202,7 @@ class Trainer:
 
             optimizer.zero_grad(set_to_none=True)
             output = model(inputs)
-            loss = self.loss_fn(output["prediction"], targets, masks)
+            loss = self.loss_fn(output, targets, masks)
             cast(Any, loss).backward()
             optimizer.step()
             losses.append(float(loss.detach().cpu().item()))
@@ -200,6 +217,8 @@ class Trainer:
         desc: str,
     ) -> float:
         model.eval()
+        if self.loss_fn is None:
+            raise RuntimeError("Loss function is not initialized.")
         loader = DataLoader(
             WindowedTorchDataset(split),
             batch_size=self.config.trainer.batch_size,
@@ -219,7 +238,7 @@ class Trainer:
                 targets = targets.to(self.device)
                 masks = masks.to(self.device)
                 output = model(inputs)
-                loss = self.loss_fn(output["prediction"], targets, masks)
+                loss = self.loss_fn(output, targets, masks)
                 losses.append(float(loss.detach().cpu().item()))
                 batch_bar.set_postfix(loss=f"{np.mean(losses):.4f}")
         return float(np.mean(losses))
@@ -255,6 +274,7 @@ class Trainer:
             "runtime": asdict(self.config.runtime),
             "data": asdict(self.config.data),
             "normalization": asdict(self.config.normalization),
+            "loss": asdict(self.config.loss),
             "model": model_payload,
             "trainer": asdict(self.config.trainer),
             "evaluation": asdict(self.config.evaluation),

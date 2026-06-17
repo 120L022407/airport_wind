@@ -5,8 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .helpers import create_synthetic_data_root
-from .helpers import create_series_fixture
+from .helpers import create_series_fixture, create_synthetic_data_root
 
 
 def test_training_and_evaluation_smoke(tmp_path: Path) -> None:
@@ -98,6 +97,77 @@ evaluation:
 
     saved_metrics = json.loads((run_dir / "metrics.json").read_text(encoding="utf-8"))
     assert saved_metrics["real_observation_only"] is True
+
+
+def test_gru_composite_fourier_loss_smoke(tmp_path: Path) -> None:
+    data_root = create_synthetic_data_root(tmp_path)
+    output_root = tmp_path / "outputs"
+    config_path = tmp_path / "smoke_gru_facl.yaml"
+    config_path.write_text(
+        f"""
+experiment:
+  name: smoke_gru_facl
+  seed: 12
+runtime:
+  output_root: {output_root}
+data:
+  root: {data_root}
+  source: series
+  airports: [ZGSZ, ZGGG, VHHH, VMMC]
+  target_airports: [ZGSZ]
+  input_variables: [sknt]
+  target_variables: [sknt]
+  time_resolution: 1h
+  input_steps: 24
+  forecast_steps: 24
+normalization:
+  enabled: true
+  method: zscore
+  fit_split: train
+  apply_to_inputs: true
+loss:
+  name: composite
+  terms:
+    - name: mse
+      weight: 1.0
+    - name: fourier_amplitude_correlation
+      weight: 0.2
+      params:
+        mode: paper_random
+        alpha: 0.1
+model:
+  name: gru
+  hidden_size: 8
+  num_layers: 1
+  dropout: 0.0
+trainer:
+  device: cpu
+  batch_size: 4
+  epochs: 2
+  patience: 2
+  learning_rate: 0.001
+  weight_decay: 0.0
+  min_delta: 0.0
+evaluation:
+  metrics: [mae, rmse, bias]
+  real_observation_only: true
+""",
+        encoding="utf-8",
+    )
+
+    train_result = subprocess.run(
+        [sys.executable, "scripts/train.py", "--config", str(config_path)],
+        cwd=Path.cwd(),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    run_dir = Path(train_result.stdout.strip())
+    assert (run_dir / "best_checkpoint.pt").is_file()
+    assert (run_dir / "resolved_config.yaml").is_file()
+
+    saved_config = (run_dir / "resolved_config.yaml").read_text(encoding="utf-8")
+    assert "fourier_amplitude_correlation" in saved_config
 
 
 def test_tfps_training_and_evaluation_smoke(tmp_path: Path) -> None:
@@ -253,6 +323,86 @@ evaluation:
 """,
         encoding="utf-8",
     )
+    train_result = subprocess.run(
+        [sys.executable, "scripts/train.py", "--config", str(config_path)],
+        cwd=Path.cwd(),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    run_dir = Path(train_result.stdout.strip())
+    assert (run_dir / "best_checkpoint.pt").is_file()
+    assert (run_dir / "resolved_config.yaml").is_file()
+
+    eval_result = subprocess.run(
+        [sys.executable, "scripts/evaluate.py", "--run-dir", str(run_dir)],
+        cwd=Path.cwd(),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    metrics = json.loads(eval_result.stdout)
+    assert set(metrics["test"]) == {"mae", "rmse", "bias"}
+
+
+def test_hcan_training_and_evaluation_smoke(tmp_path: Path) -> None:
+    data_root = create_synthetic_data_root(tmp_path)
+    output_root = tmp_path / "outputs"
+    config_path = tmp_path / "smoke_hcan.yaml"
+    config_path.write_text(
+        f"""
+experiment:
+  name: smoke_hcan
+  seed: 23
+runtime:
+  output_root: {output_root}
+data:
+  root: {data_root}
+  source: series
+  airports: [ZGSZ, ZGGG, VHHH, VMMC]
+  target_airports: [ZGSZ]
+  input_variables: [sknt]
+  target_variables: [sknt]
+  time_resolution: 1h
+  input_steps: 24
+  forecast_steps: 24
+normalization:
+  enabled: true
+  method: zscore
+  fit_split: train
+  apply_to_inputs: true
+loss:
+  name: composite
+  terms:
+    - name: hcan_auxiliary
+      weight: 1.0
+model:
+  name: hcan
+  backbone_hidden_size: 16
+  backbone_num_layers: 1
+  backbone_dropout: 0.0
+  hidden_dim: 8
+  num_coarse: 4
+  num_fine: 8
+  lambda_cls: 1.0
+  lambda_reg: 1.0
+  lambda_acl: 1.0
+  lambda_direct: 1.0
+trainer:
+  device: cpu
+  batch_size: 4
+  epochs: 1
+  patience: 1
+  learning_rate: 0.001
+  weight_decay: 0.0
+  min_delta: 0.0
+evaluation:
+  metrics: [mae, rmse, bias]
+  real_observation_only: true
+""",
+        encoding="utf-8",
+    )
+
     train_result = subprocess.run(
         [sys.executable, "scripts/train.py", "--config", str(config_path)],
         cwd=Path.cwd(),

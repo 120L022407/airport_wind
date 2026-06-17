@@ -20,6 +20,19 @@
   
   The current priority is to establish architecture, interfaces, configuration,
   tests, and repository rules before implementing multiple training models.
+
+  ## Default experiment preference
+
+  Unless a task explicitly requires another source or resolution, new training
+  baselines and model-to-model comparisons should default to:
+
+  - data source: `series_15min`;
+  - task: past 24 hours to next 24 hours, i.e. `input_steps=96` and
+    `forecast_steps=96`;
+  - target airport: `ZGSZ`.
+
+  Hourly (`series`) configs remain supported for comparison and backward
+  compatibility, but they are no longer the default experimental starting point.
   
   # Core rules
   

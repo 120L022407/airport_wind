@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import patch
 
 import numpy as np
@@ -135,14 +136,17 @@ def test_save_test_prediction_figures_filters_to_observed_points(
     original_plot = Axes.plot
 
     def spy_plot(self: Axes, *args: object, **kwargs: object) -> object:
+        label: str | None
+        raw_label = kwargs.get("label")
+        label = raw_label if isinstance(raw_label, str) else None
         plot_calls.append(
             (
                 np.asarray(args[0], dtype=np.int64).copy(),
                 np.asarray(args[1], dtype=np.float64).copy(),
-                kwargs.get("label") if isinstance(kwargs.get("label"), str) else None,
+                label,
             )
         )
-        return original_plot(self, *args, **kwargs)
+        return cast(Any, original_plot)(self, *args, **kwargs)
 
     with patch.object(Axes, "plot", new=spy_plot):
         save_test_prediction_figures(

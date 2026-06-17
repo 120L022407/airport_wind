@@ -12,9 +12,24 @@ def test_load_baseline_config() -> None:
     assert config.data.source == "series"
     assert config.model.name == "gru"
     assert config.data.target_airports == ["ZGSZ"]
+    assert config.loss.name == "composite"
+    assert len(config.loss.terms) == 1
+    assert config.loss.terms[0].name == "mse"
     assert config.model.parameters["hidden_size"] == 64
     assert config.data.input_steps == 24
     assert config.data.forecast_steps == 24
+
+
+def test_load_gru_facl_config() -> None:
+    config = load_config("config/gru/baseline_hourly_facl.yaml")
+    assert config.model.name == "gru"
+    assert config.loss.name == "composite"
+    assert [term.name for term in config.loss.terms] == [
+        "mse",
+        "fourier_amplitude_correlation",
+    ]
+    assert config.loss.terms[1].params["mode"] == "paper_random"
+    assert config.loss.terms[1].params["alpha"] == 0.1
 
 
 def test_load_gru_15min_config() -> None:
@@ -30,11 +45,22 @@ def test_load_gru_15min_config() -> None:
 @pytest.mark.parametrize(
     ("config_path", "model_name", "expected_steps"),
     [
+        ("config/gru/baseline_15min_facl.yaml", "gru", 96),
+        ("config/gru/baseline_hourly_facl.yaml", "gru", 24),
         ("config/gru/baseline_15min.yaml", "gru", 96),
+        ("config/hcan/baseline_15min.yaml", "hcan", 96),
+        ("config/hcan/baseline_15min_facl.yaml", "hcan", 96),
+        ("config/hcan/baseline_hourly.yaml", "hcan", 24),
+        ("config/hcan/no_hcl_hourly.yaml", "hcan", 24),
+        ("config/patchtst/baseline_15min_facl.yaml", "patchtst", 96),
         ("config/patchtst/baseline_15min.yaml", "patchtst", 96),
+        ("config/itransformer/baseline_15min_facl.yaml", "itransformer", 96),
         ("config/itransformer/baseline_15min.yaml", "itransformer", 96),
+        ("config/dlinear/baseline_15min_facl.yaml", "dlinear", 96),
         ("config/dlinear/baseline_15min.yaml", "dlinear", 96),
+        ("config/tfps/baseline_15min_facl.yaml", "tfps", 96),
         ("config/tfps/baseline_15min.yaml", "tfps", 96),
+        ("config/timebridge/baseline_15min_facl.yaml", "timebridge", 96),
         ("config/timebridge/baseline_15min.yaml", "timebridge", 96),
         ("config/patchtst/baseline_hourly.yaml", "patchtst", 24),
         ("config/itransformer/baseline_hourly.yaml", "itransformer", 24),
@@ -259,6 +285,107 @@ model:
         encoding="utf-8",
     )
     with pytest.raises(ConfigError, match="does not support"):
+        load_config(config_path)
+
+
+def test_config_rejects_hcan_non_hierarchical_class_ratio(tmp_path: Path) -> None:
+    config_path = tmp_path / "invalid_hcan.yaml"
+    config_path.write_text(
+        _valid_config_text(
+            """
+model:
+  name: hcan
+  backbone_hidden_size: 16
+  backbone_num_layers: 1
+  backbone_dropout: 0.0
+  hidden_dim: 8
+  num_coarse: 4
+  num_fine: 6
+  lambda_cls: 1.0
+  lambda_reg: 1.0
+  lambda_acl: 1.0
+  lambda_direct: 1.0
+"""
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="num_fine"):
+        load_config(config_path)
+
+
+def test_config_rejects_unknown_loss_term(tmp_path: Path) -> None:
+    config_path = tmp_path / "invalid_loss_term.yaml"
+    config_path.write_text(
+        _valid_config_text(
+            """
+loss:
+  name: composite
+  terms:
+    - name: unknown_loss
+      weight: 1.0
+model:
+  name: gru
+  hidden_size: 16
+  num_layers: 1
+  dropout: 0.0
+"""
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="loss.terms\\[0\\].name"):
+        load_config(config_path)
+
+
+def test_config_rejects_facl_alpha_out_of_range(tmp_path: Path) -> None:
+    config_path = tmp_path / "invalid_facl_alpha.yaml"
+    config_path.write_text(
+        _valid_config_text(
+            """
+loss:
+  name: composite
+  terms:
+    - name: mse
+      weight: 1.0
+    - name: fourier_amplitude_correlation
+      weight: 0.2
+      params:
+        mode: paper_random
+        alpha: 1.5
+model:
+  name: gru
+  hidden_size: 16
+  num_layers: 1
+  dropout: 0.0
+"""
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="alpha"):
+        load_config(config_path)
+
+
+def test_config_rejects_mse_with_hcan_auxiliary(tmp_path: Path) -> None:
+    config_path = tmp_path / "invalid_hcan_loss_combo.yaml"
+    config_path.write_text(
+        _valid_config_text(
+            """
+loss:
+  name: composite
+  terms:
+    - name: mse
+      weight: 1.0
+    - name: hcan_auxiliary
+      weight: 1.0
+model:
+  name: gru
+  hidden_size: 16
+  num_layers: 1
+  dropout: 0.0
+"""
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="hcan_auxiliary"):
         load_config(config_path)
 
 

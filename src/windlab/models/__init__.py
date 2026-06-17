@@ -2,6 +2,7 @@
 
 from .dlinear import DLinearModel
 from .gru import GRUModel
+from .hcan import HCANModel
 from .itransformer import ITransformerModel
 from .patchtst import PatchTSTModel
 from .tfps import TFPSModel
@@ -10,6 +11,7 @@ from .timebridge import TimeBridgeModel
 __all__ = [
     "DLinearModel",
     "GRUModel",
+    "HCANModel",
     "ITransformerModel",
     "PatchTSTModel",
     "TimeBridgeModel",

@@ -6,14 +6,15 @@ import pytest
 import torch
 from torch import nn
 
+from windlab.config import load_config
 from windlab.models.dlinear import DLinearModel
 from windlab.models.gru import GRUModel
+from windlab.models.hcan import HCANModel
 from windlab.models.itransformer import ITransformerModel
 from windlab.models.patchtst import PatchTSTModel
 from windlab.models.tfps import TFPSModel
 from windlab.models.timebridge import TimeBridgeModel
 from windlab.registry import MODELS
-from windlab.config import load_config
 
 
 def _common_kwargs() -> dict[str, int]:
@@ -31,6 +32,22 @@ MODEL_CASES = [
         "gru",
         GRUModel,
         {"hidden_size": 16, "num_layers": 1, "dropout": 0.0},
+    ),
+    (
+        "hcan",
+        HCANModel,
+        {
+            "backbone_hidden_size": 16,
+            "backbone_num_layers": 1,
+            "backbone_dropout": 0.0,
+            "hidden_dim": 8,
+            "num_coarse": 4,
+            "num_fine": 8,
+            "lambda_cls": 1.0,
+            "lambda_reg": 1.0,
+            "lambda_acl": 1.0,
+            "lambda_direct": 1.0,
+        },
     ),
     (
         "patchtst",
@@ -182,6 +199,23 @@ def test_patchtst_rejects_patch_longer_than_input() -> None:
             dropout=0.0,
             patch_len=25,
             stride=1,
+        )
+
+
+def test_hcan_rejects_inconsistent_hierarchy_sizes() -> None:
+    with pytest.raises(ValueError, match="num_fine"):
+        HCANModel(
+            **_common_kwargs(),
+            backbone_hidden_size=16,
+            backbone_num_layers=1,
+            backbone_dropout=0.0,
+            hidden_dim=8,
+            num_coarse=4,
+            num_fine=6,
+            lambda_cls=1.0,
+            lambda_reg=1.0,
+            lambda_acl=1.0,
+            lambda_direct=1.0,
         )
 
 
