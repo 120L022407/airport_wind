@@ -37,11 +37,16 @@ def create_synthetic_data_root(base_path: Path) -> Path:
     return data_root
 
 
-def create_series_fixture(dataset_root: Path, source: str) -> None:
+def create_series_fixture(
+    dataset_root: Path,
+    source: str,
+    *,
+    shapes: dict[str, int] | None = None,
+) -> None:
     dataset_root.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(42)
-    shapes = {"train": 72, "val": 56, "test": 56}
-    for split_name, time_length in shapes.items():
+    split_shapes = shapes or {"train": 72, "val": 56, "test": 56}
+    for split_name, time_length in split_shapes.items():
         array = rng.normal(
             loc=5.0,
             scale=2.0,

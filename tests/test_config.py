@@ -31,6 +31,11 @@ def test_load_gru_15min_config() -> None:
     ("config_path", "model_name", "expected_steps"),
     [
         ("config/gru/baseline_15min.yaml", "gru", 96),
+        ("config/patchtst/baseline_15min.yaml", "patchtst", 96),
+        ("config/itransformer/baseline_15min.yaml", "itransformer", 96),
+        ("config/dlinear/baseline_15min.yaml", "dlinear", 96),
+        ("config/tfps/baseline_15min.yaml", "tfps", 96),
+        ("config/timebridge/baseline_15min.yaml", "timebridge", 96),
         ("config/patchtst/baseline_hourly.yaml", "patchtst", 24),
         ("config/itransformer/baseline_hourly.yaml", "itransformer", 24),
         ("config/dlinear/baseline_hourly.yaml", "dlinear", 24),

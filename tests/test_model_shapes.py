@@ -13,6 +13,7 @@ from windlab.models.patchtst import PatchTSTModel
 from windlab.models.tfps import TFPSModel
 from windlab.models.timebridge import TimeBridgeModel
 from windlab.registry import MODELS
+from windlab.config import load_config
 
 
 def _common_kwargs() -> dict[str, int]:
@@ -140,6 +141,34 @@ def test_model_supports_batch_size_one(
     model = model_class(**_common_kwargs(), **model_kwargs)
     output = model(torch.randn(1, 24, 4, 13))
     assert output["prediction"].shape == (1, 24, 4, 1)
+
+
+@pytest.mark.parametrize(
+    "config_path",
+    [
+        "config/patchtst/baseline_15min.yaml",
+        "config/itransformer/baseline_15min.yaml",
+        "config/dlinear/baseline_15min.yaml",
+        "config/tfps/baseline_15min.yaml",
+        "config/timebridge/baseline_15min.yaml",
+    ],
+)
+def test_15min_baseline_configs_build_models_with_expected_shape(
+    config_path: str,
+) -> None:
+    config = load_config(config_path)
+    model_class = cast(type[nn.Module], MODELS.get(config.model.name))
+    model = model_class(
+        input_size=52,
+        input_steps=96,
+        forecast_steps=96,
+        airport_count=1,
+        target_size=1,
+        **config.model.parameters,
+    )
+
+    output = model(torch.randn(2, 96, 4, 13))
+    assert output["prediction"].shape == (2, 96, 1, 1)
 
 
 def test_patchtst_rejects_patch_longer_than_input() -> None:

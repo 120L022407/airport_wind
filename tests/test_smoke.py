@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from .helpers import create_synthetic_data_root
+from .helpers import create_series_fixture
 
 
 def test_training_and_evaluation_smoke(tmp_path: Path) -> None:
@@ -268,3 +269,96 @@ evaluation:
     )
     metrics = json.loads(eval_result.stdout)
     assert set(metrics["test"]) == {"mae", "rmse", "bias"}
+
+
+def test_patchtst_series_15min_training_and_evaluation_smoke(tmp_path: Path) -> None:
+    data_root = tmp_path / "synthetic_data"
+    create_series_fixture(
+        data_root / "series_15min",
+        source="series_15min",
+        shapes={"train": 224, "val": 208, "test": 208},
+    )
+    output_root = tmp_path / "outputs"
+    config_path = tmp_path / "smoke_patchtst_15min.yaml"
+    config_path.write_text(
+        f"""
+experiment:
+  name: smoke_patchtst_15min
+  seed: 19
+runtime:
+  output_root: {output_root}
+data:
+  root: {data_root}
+  source: series_15min
+  airports: [ZGSZ, ZGGG, VHHH, VMMC]
+  target_airports: [ZGSZ]
+  input_variables:
+    [
+      sknt,
+      wind_dir_sin,
+      wind_dir_cos,
+      tmpf,
+      alti,
+      dwpf,
+      relh,
+      gust,
+      hour_sin,
+      hour_cos,
+      month_sin,
+      month_cos,
+      day_of_year_norm,
+    ]
+  target_variables: [sknt]
+  time_resolution: 15min
+  input_steps: 96
+  forecast_steps: 96
+normalization:
+  enabled: true
+  method: zscore
+  fit_split: train
+  apply_to_inputs: true
+model:
+  name: patchtst
+  d_model: 16
+  num_layers: 1
+  n_heads: 4
+  ff_dim: 32
+  dropout: 0.0
+  patch_len: 24
+  stride: 12
+trainer:
+  device: cpu
+  batch_size: 4
+  epochs: 1
+  patience: 1
+  learning_rate: 0.001
+  weight_decay: 0.0
+  min_delta: 0.0
+evaluation:
+  metrics: [mae, rmse, bias]
+  real_observation_only: true
+""",
+        encoding="utf-8",
+    )
+
+    train_result = subprocess.run(
+        [sys.executable, "scripts/train.py", "--config", str(config_path)],
+        cwd=Path.cwd(),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    run_dir = Path(train_result.stdout.strip())
+    assert (run_dir / "best_checkpoint.pt").is_file()
+    assert (run_dir / "metrics.json").is_file()
+
+    eval_result = subprocess.run(
+        [sys.executable, "scripts/evaluate.py", "--run-dir", str(run_dir)],
+        cwd=Path.cwd(),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    metrics = json.loads(eval_result.stdout)
+    assert set(metrics["test"]) == {"mae", "rmse", "bias"}
+    assert metrics["real_observation_only"] is True
