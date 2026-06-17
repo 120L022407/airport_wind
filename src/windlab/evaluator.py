@@ -12,6 +12,7 @@ import torch
 from numpy.typing import NDArray
 from torch import nn
 from torch.utils.data import DataLoader
+from tqdm.auto import tqdm
 
 from windlab.config import ExperimentConfig, load_config
 from windlab.data.normalization import apply_normalization, load_normalization_state
@@ -108,8 +109,20 @@ class Evaluator:
         windowed: WindowedData,
         device: torch.device,
     ) -> dict[str, Any]:
-        val_prediction = self._predict_numpy(config, model, windowed.val, device)
-        test_prediction = self._predict_numpy(config, model, windowed.test, device)
+        val_prediction = self._predict_numpy(
+            config,
+            model,
+            windowed.val,
+            device,
+            desc="Predict val",
+        )
+        test_prediction = self._predict_numpy(
+            config,
+            model,
+            windowed.test,
+            device,
+            desc="Predict test",
+        )
         val_mask = (
             windowed.val.observed_target_mask
             if config.evaluation.real_observation_only
@@ -155,6 +168,8 @@ class Evaluator:
         model: nn.Module,
         split: WindowedSplit,
         device: torch.device,
+        *,
+        desc: str,
     ) -> FloatArray:
         model.eval()
         loader = DataLoader(
@@ -164,7 +179,14 @@ class Evaluator:
         )
         predictions: list[FloatArray] = []
         with torch.no_grad():
-            for inputs, _, _ in loader:
+            batch_bar = tqdm(
+                loader,
+                total=len(loader),
+                desc=desc,
+                leave=True,
+                dynamic_ncols=True,
+            )
+            for inputs, _, _ in batch_bar:
                 output = model(inputs.to(device))
                 prediction = output["prediction"].detach().cpu().numpy()
                 predictions.append(prediction.astype(np.float64, copy=False))

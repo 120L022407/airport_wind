@@ -76,6 +76,8 @@ evaluation:
         capture_output=True,
         text=True,
     )
+    assert "Train epochs" in train_result.stderr
+    assert "Predict test" in train_result.stderr
     run_dir = Path(train_result.stdout.strip())
     assert (run_dir / "config.yaml").is_file()
     assert (run_dir / "checkpoint.pt").is_file()
@@ -89,6 +91,8 @@ evaluation:
         capture_output=True,
         text=True,
     )
+    assert "Predict val" in eval_result.stderr
+    assert "Predict test" in eval_result.stderr
     metrics = json.loads(eval_result.stdout)
     assert set(metrics["validation"]) == {"mae", "rmse", "bias"}
 

@@ -13,6 +13,7 @@ import torch
 from numpy.typing import NDArray
 from torch import nn
 from torch.utils.data import DataLoader
+from tqdm.auto import tqdm
 
 from windlab.config import ExperimentConfig, load_config
 from windlab.data.normalization import (
@@ -99,10 +100,25 @@ class Trainer:
         best_val_loss = float("inf")
         epochs_without_improvement = 0
         training_log: list[dict[str, float | int]] = []
+        epoch_bar = tqdm(
+            range(1, self.config.trainer.epochs + 1),
+            desc="Train epochs",
+            leave=True,
+            dynamic_ncols=True,
+        )
 
-        for epoch in range(1, self.config.trainer.epochs + 1):
-            train_loss = self._run_training_epoch(model, optimizer, train_loader)
-            val_loss = self._evaluate_loss(model, windowed.val)
+        for epoch in epoch_bar:
+            train_loss = self._run_training_epoch(
+                model,
+                optimizer,
+                train_loader,
+                epoch=epoch,
+            )
+            val_loss = self._evaluate_loss(
+                model,
+                windowed.val,
+                desc=f"Epoch {epoch} val",
+            )
             log_row: dict[str, float | int] = {
                 "epoch": epoch,
                 "train_loss": train_loss,
@@ -132,7 +148,15 @@ class Trainer:
                 best_val_loss=best_val_loss,
             )
 
+            epoch_bar.set_postfix(
+                train_loss=f"{train_loss:.4f}",
+                val_loss=f"{val_loss:.4f}",
+                best_val=f"{best_val_loss:.4f}",
+                patience=f"{epochs_without_improvement}/{self.config.trainer.patience}",
+            )
+
             if epochs_without_improvement >= self.config.trainer.patience:
+                epoch_bar.write(f"Early stopping at epoch {epoch}.")
                 break
 
         return training_log
@@ -142,10 +166,19 @@ class Trainer:
         model: nn.Module,
         optimizer: torch.optim.Optimizer,
         train_loader: DataLoader[tuple[torch.Tensor, torch.Tensor, torch.Tensor]],
+        *,
+        epoch: int,
     ) -> float:
         model.train()
         losses: list[float] = []
-        for inputs, targets, masks in train_loader:
+        batch_bar = tqdm(
+            train_loader,
+            total=len(train_loader),
+            desc=f"Epoch {epoch} train",
+            leave=False,
+            dynamic_ncols=True,
+        )
+        for inputs, targets, masks in batch_bar:
             inputs = inputs.to(self.device)
             targets = targets.to(self.device)
             masks = masks.to(self.device)
@@ -156,9 +189,16 @@ class Trainer:
             cast(Any, loss).backward()
             optimizer.step()
             losses.append(float(loss.detach().cpu().item()))
+            batch_bar.set_postfix(loss=f"{np.mean(losses):.4f}")
         return float(np.mean(losses))
 
-    def _evaluate_loss(self, model: nn.Module, split: WindowedSplit) -> float:
+    def _evaluate_loss(
+        self,
+        model: nn.Module,
+        split: WindowedSplit,
+        *,
+        desc: str,
+    ) -> float:
         model.eval()
         loader = DataLoader(
             WindowedTorchDataset(split),
@@ -167,13 +207,21 @@ class Trainer:
         )
         losses: list[float] = []
         with torch.no_grad():
-            for inputs, targets, masks in loader:
+            batch_bar = tqdm(
+                loader,
+                total=len(loader),
+                desc=desc,
+                leave=False,
+                dynamic_ncols=True,
+            )
+            for inputs, targets, masks in batch_bar:
                 inputs = inputs.to(self.device)
                 targets = targets.to(self.device)
                 masks = masks.to(self.device)
                 output = model(inputs)
                 loss = self.loss_fn(output["prediction"], targets, masks)
                 losses.append(float(loss.detach().cpu().item()))
+                batch_bar.set_postfix(loss=f"{np.mean(losses):.4f}")
         return float(np.mean(losses))
 
     def _build_model(self, windowed: WindowedData) -> nn.Module:
@@ -261,8 +309,8 @@ class Trainer:
         model: nn.Module,
         windowed: WindowedData,
     ) -> dict[str, Any]:
-        val_prediction = self._predict_numpy(model, windowed.val)
-        test_prediction = self._predict_numpy(model, windowed.test)
+        val_prediction = self._predict_numpy(model, windowed.val, desc="Predict val")
+        test_prediction = self._predict_numpy(model, windowed.test, desc="Predict test")
         val_mask = (
             windowed.val.observed_target_mask
             if self.config.evaluation.real_observation_only
@@ -285,7 +333,11 @@ class Trainer:
             windowed.test.targets,
             test_mask,
         )
-        val_metrics["mse_loss"] = self._evaluate_loss(model, windowed.val)
+        val_metrics["mse_loss"] = self._evaluate_loss(
+            model,
+            windowed.val,
+            desc="Validation loss",
+        )
         return {
             "validation": val_metrics,
             "test": test_metrics,
@@ -293,7 +345,13 @@ class Trainer:
             "metrics": list(self.config.evaluation.metrics),
         }
 
-    def _predict_numpy(self, model: nn.Module, split: WindowedSplit) -> FloatArray:
+    def _predict_numpy(
+        self,
+        model: nn.Module,
+        split: WindowedSplit,
+        *,
+        desc: str,
+    ) -> FloatArray:
         model.eval()
         loader = DataLoader(
             WindowedTorchDataset(split),
@@ -302,7 +360,14 @@ class Trainer:
         )
         predictions: list[FloatArray] = []
         with torch.no_grad():
-            for inputs, _, _ in loader:
+            batch_bar = tqdm(
+                loader,
+                total=len(loader),
+                desc=desc,
+                leave=True,
+                dynamic_ncols=True,
+            )
+            for inputs, _, _ in batch_bar:
                 output = model(inputs.to(self.device))
                 prediction = output["prediction"].detach().cpu().numpy()
                 predictions.append(prediction.astype(np.float64, copy=False))
