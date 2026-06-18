@@ -43,7 +43,7 @@ def test_masked_mse_rejects_empty_mask() -> None:
         masked_mse_loss(prediction, target, mask)
 
 
-def test_fourier_loss_fal_mode_respects_full_sequence_mask() -> None:
+def test_fourier_loss_strict_real_only_respects_full_sequence_mask() -> None:
     prediction = torch.tensor(
         [
             [[[1.0]], [[2.0]], [[3.0]], [[4.0]]],
@@ -70,7 +70,7 @@ def test_fourier_loss_fal_mode_respects_full_sequence_mask() -> None:
             {
                 "name": "fourier_amplitude_correlation",
                 "weight": 1.0,
-                "params": {"mode": "fal"},
+                "params": {"mode": "fal", "mask_mode": "strict_real_only"},
             }
         ),
         total_train_steps=8,
@@ -82,6 +82,55 @@ def test_fourier_loss_fal_mode_respects_full_sequence_mask() -> None:
     first_target = target[:1, :, :, :].permute(0, 2, 3, 1).reshape(1, 4)
     fft_prediction = torch.fft.fft(first_prediction, dim=-1, norm="ortho")
     fft_target = torch.fft.fft(first_target, dim=-1, norm="ortho")
+    expected = torch.sqrt(torch.tensor(4.0)) * torch.nn.functional.mse_loss(
+        fft_prediction.abs(),
+        fft_target.abs(),
+    )
+
+    assert torch.allclose(loss, expected)
+    cast(Any, loss).backward()
+    assert prediction.grad is not None
+
+
+def test_fourier_loss_all_points_ignores_partial_mask_filtering() -> None:
+    prediction = torch.tensor(
+        [
+            [[[1.0]], [[2.0]], [[3.0]], [[4.0]]],
+            [[[10.0]], [[20.0]], [[30.0]], [[40.0]]],
+        ],
+        dtype=torch.float32,
+        requires_grad=True,
+    )
+    target = torch.tensor(
+        [
+            [[[2.0]], [[3.0]], [[4.0]], [[5.0]]],
+            [[[11.0]], [[21.0]], [[31.0]], [[41.0]]],
+        ],
+        dtype=torch.float32,
+    )
+    mask = torch.tensor(
+        [
+            [[[True]], [[True]], [[True]], [[True]]],
+            [[[True]], [[False]], [[True]], [[True]]],
+        ]
+    )
+    loss_fn = build_forecast_loss(
+        _loss_config(
+            {
+                "name": "fourier_amplitude_correlation",
+                "weight": 1.0,
+                "params": {"mode": "fal", "mask_mode": "all_points"},
+            }
+        ),
+        total_train_steps=8,
+    )
+
+    loss = loss_fn({"prediction": prediction}, target, mask)
+
+    all_prediction = prediction.permute(0, 2, 3, 1).reshape(2, 4)
+    all_target = target.permute(0, 2, 3, 1).reshape(2, 4)
+    fft_prediction = torch.fft.fft(all_prediction, dim=-1, norm="ortho")
+    fft_target = torch.fft.fft(all_target, dim=-1, norm="ortho")
     expected = torch.sqrt(torch.tensor(4.0)) * torch.nn.functional.mse_loss(
         fft_prediction.abs(),
         fft_target.abs(),
@@ -111,6 +160,44 @@ def test_fourier_loss_fcl_mode_has_expected_shape_and_backward() -> None:
     assert loss.ndim == 0
     assert torch.isfinite(loss)
     cast(Any, loss).backward()
+    assert prediction.grad is not None
+
+
+def test_fourier_loss_sparse_15min_mask_is_not_zero_with_all_points() -> None:
+    prediction = torch.zeros(1, 96, 1, 1, dtype=torch.float32, requires_grad=True)
+    target = torch.linspace(0.0, 1.0, steps=96, dtype=torch.float32).reshape(
+        1, 96, 1, 1
+    )
+    mask = torch.zeros_like(target, dtype=torch.bool)
+    mask[:, ::4, :, :] = True
+
+    strict_loss_fn = build_forecast_loss(
+        _loss_config(
+            {
+                "name": "fourier_amplitude_correlation",
+                "weight": 1.0,
+                "params": {"mode": "fal", "mask_mode": "strict_real_only"},
+            }
+        ),
+        total_train_steps=4,
+    )
+    all_points_loss_fn = build_forecast_loss(
+        _loss_config(
+            {
+                "name": "fourier_amplitude_correlation",
+                "weight": 1.0,
+                "params": {"mode": "fal", "mask_mode": "all_points"},
+            }
+        ),
+        total_train_steps=4,
+    )
+
+    strict_loss = strict_loss_fn({"prediction": prediction}, target, mask)
+    all_points_loss = all_points_loss_fn({"prediction": prediction}, target, mask)
+
+    assert strict_loss.item() == pytest.approx(0.0)
+    assert all_points_loss.item() > 0.0
+    cast(Any, all_points_loss).backward()
     assert prediction.grad is not None
 
 
@@ -145,6 +232,18 @@ def test_build_forecast_loss_rejects_invalid_fourier_params() -> None:
                     "name": "fourier_amplitude_correlation",
                     "weight": 1.0,
                     "params": {"mode": "paper_random"},
+                }
+            ),
+            total_train_steps=6,
+        )
+
+    with pytest.raises(ValueError, match="mask_mode"):
+        build_forecast_loss(
+            _loss_config(
+                {
+                    "name": "fourier_amplitude_correlation",
+                    "weight": 1.0,
+                    "params": {"mode": "fal", "mask_mode": "invalid"},
                 }
             ),
             total_train_steps=6,

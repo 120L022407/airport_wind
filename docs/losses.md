@@ -15,6 +15,7 @@ loss:
       params:
         mode: paper_random
         alpha: 0.1
+        mask_mode: strict_real_only
 ```
 
 If `loss` is omitted, the framework defaults to:
@@ -55,9 +56,9 @@ Project adaptation for the current wind-speed task:
 
 - the paper operates on 2D imagery, while this project predicts 1D future
   sequences, so FFT is applied only along the forecast horizon;
-- the current mask contract is point-wise; the Fourier term therefore uses only
-  fully observed `[batch, airport, target]` sequences across the whole forecast
-  horizon and skips partially observed sequences;
+- the current mask contract is point-wise, so the Fourier term exposes an
+  explicit `mask_mode` to control whether sparse observed masks should filter
+  whole forecast sequences or be ignored for the Fourier term itself;
 - evaluation/validation loss should be deterministic, so in `paper_random` mode
   the framework uses the scheduled expectation `p * FCL + (1 - p) * FAL` when
   gradients are disabled, while training uses stochastic switching as in the
@@ -68,3 +69,13 @@ Supported params:
 - `mode: paper_random | fal | fcl`
 - `alpha`: required only for `paper_random`; the ratio of training steps where
   the probability threshold has already reached `0`
+- `mask_mode: strict_real_only | all_points`
+
+`mask_mode` semantics:
+
+- `strict_real_only`: keep the previous default behavior and use only fully
+  observed `[batch, airport, target]` sequences across the whole forecast
+  horizon;
+- `all_points`: ignore the observed-target mask inside the Fourier term and use
+  every forecast sequence, which is the recommended setting for current 15min
+  sparse-mask FACL baselines.

@@ -20,6 +20,7 @@ BoolArray = NDArray[np.bool_]
 ModelOutput = Mapping[str, Any] | torch.Tensor
 LossFn = Callable[[ModelOutput, torch.Tensor, torch.Tensor | None], torch.Tensor]
 LossTermBuilder = Callable[[dict[str, Any], "LossBuildContext"], LossFn]
+SUPPORTED_FOURIER_MASK_MODES = frozenset({"strict_real_only", "all_points"})
 
 
 class LossTermConfigProtocol(Protocol):
@@ -419,11 +420,16 @@ class FourierAmplitudeCorrelationLossTerm:
         mode: str,
         total_train_steps: int,
         alpha: float | None = None,
+        mask_mode: str = "strict_real_only",
     ) -> None:
         if mode not in {"paper_random", "fal", "fcl"}:
             raise ValueError("mode must be 'paper_random', 'fal', or 'fcl'.")
         if total_train_steps <= 0:
             raise ValueError("total_train_steps must be positive.")
+        if mask_mode not in SUPPORTED_FOURIER_MASK_MODES:
+            raise ValueError(
+                "mask_mode must be 'strict_real_only' or 'all_points'."
+            )
         if mode == "paper_random":
             if alpha is None or not 0.0 <= alpha <= 1.0:
                 raise ValueError(
@@ -434,6 +440,7 @@ class FourierAmplitudeCorrelationLossTerm:
         self.mode = mode
         self.total_train_steps = total_train_steps
         self.alpha = alpha
+        self.mask_mode = mask_mode
         self.step_count = 0
 
     def __call__(
@@ -443,7 +450,7 @@ class FourierAmplitudeCorrelationLossTerm:
         mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         prediction, _ = _extract_prediction_and_aux(output)
-        active_prediction, active_target = self._select_fully_observed_sequences(
+        active_prediction, active_target = self._select_active_sequences(
             prediction,
             target,
             mask,
@@ -472,7 +479,7 @@ class FourierAmplitudeCorrelationLossTerm:
             return scale * fal_loss
         return scale * fcl_loss
 
-    def _select_fully_observed_sequences(
+    def _select_active_sequences(
         self,
         prediction: torch.Tensor,
         target: torch.Tensor,
@@ -490,16 +497,17 @@ class FourierAmplitudeCorrelationLossTerm:
             )
         prediction_sequences = prediction.permute(0, 2, 3, 1)
         target_sequences = target.permute(0, 2, 3, 1)
-        if mask is None:
+        if mask is not None and mask.shape != target.shape:
+            raise ValueError(
+                "Mask shape "
+                f"{mask.shape} does not match target shape {target.shape}."
+            )
+        if mask is None or self.mask_mode == "all_points":
             sequence_mask = torch.ones_like(
-                prediction_sequences[..., 0], dtype=torch.bool
+                prediction_sequences[..., 0],
+                dtype=torch.bool,
             )
         else:
-            if mask.shape != target.shape:
-                raise ValueError(
-                    "Mask shape "
-                    f"{mask.shape} does not match target shape {target.shape}."
-                )
             sequence_mask = mask.bool().permute(0, 2, 3, 1).all(dim=-1)
         return prediction_sequences[sequence_mask], target_sequences[sequence_mask]
 
@@ -559,13 +567,19 @@ def _build_fourier_amplitude_correlation_term(
 ) -> LossFn:
     mode = params.get("mode")
     alpha = params.get("alpha")
+    mask_mode = params.get("mask_mode", "strict_real_only")
     if not isinstance(mode, str):
         raise ValueError("fourier_amplitude_correlation requires a string mode.")
     if alpha is not None and not isinstance(alpha, (int, float)):
         raise ValueError("fourier_amplitude_correlation alpha must be numeric.")
+    if not isinstance(mask_mode, str):
+        raise ValueError(
+            "fourier_amplitude_correlation mask_mode must be a string."
+        )
     return FourierAmplitudeCorrelationLossTerm(
         mode=mode,
         alpha=None if alpha is None else float(alpha),
+        mask_mode=mask_mode,
         total_train_steps=context.total_train_steps,
     )
 

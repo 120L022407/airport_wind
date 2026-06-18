@@ -30,6 +30,7 @@ def test_load_gru_facl_config() -> None:
     ]
     assert config.loss.terms[1].params["mode"] == "paper_random"
     assert config.loss.terms[1].params["alpha"] == 0.1
+    assert config.loss.terms[1].params["mask_mode"] == "strict_real_only"
 
 
 def test_load_gru_15min_config() -> None:
@@ -40,6 +41,28 @@ def test_load_gru_15min_config() -> None:
     assert config.data.input_steps == 96
     assert config.data.forecast_steps == 96
     assert config.trainer.batch_size == 32
+
+
+@pytest.mark.parametrize(
+    "config_path",
+    [
+        "config/gru/baseline_15min_facl.yaml",
+        "config/hcan/baseline_15min_facl.yaml",
+        "config/patchtst/baseline_15min_facl.yaml",
+        "config/itransformer/baseline_15min_facl.yaml",
+        "config/dlinear/baseline_15min_facl.yaml",
+        "config/tfps/baseline_15min_facl.yaml",
+        "config/timebridge/baseline_15min_facl.yaml",
+    ],
+)
+def test_load_15min_facl_configs_use_all_points_mask_mode(config_path: str) -> None:
+    config = load_config(config_path)
+    fourier_term = next(
+        term
+        for term in config.loss.terms
+        if term.name == "fourier_amplitude_correlation"
+    )
+    assert fourier_term.params["mask_mode"] == "all_points"
 
 
 @pytest.mark.parametrize(
@@ -361,6 +384,34 @@ model:
         encoding="utf-8",
     )
     with pytest.raises(ConfigError, match="alpha"):
+        load_config(config_path)
+
+
+def test_config_rejects_invalid_fourier_mask_mode(tmp_path: Path) -> None:
+    config_path = tmp_path / "invalid_facl_mask_mode.yaml"
+    config_path.write_text(
+        _valid_config_text(
+            """
+loss:
+  name: composite
+  terms:
+    - name: mse
+      weight: 1.0
+    - name: fourier_amplitude_correlation
+      weight: 0.2
+      params:
+        mode: fal
+        mask_mode: invalid
+model:
+  name: gru
+  hidden_size: 16
+  num_layers: 1
+  dropout: 0.0
+"""
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="mask_mode"):
         load_config(config_path)
 
 

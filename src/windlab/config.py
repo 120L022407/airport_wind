@@ -19,6 +19,8 @@ SUPPORTED_LOSS_TERMS = {
     "hcan_auxiliary",
     "fourier_amplitude_correlation",
 }
+SUPPORTED_FOURIER_LOSS_MODES = {"paper_random", "fal", "fcl"}
+SUPPORTED_FOURIER_MASK_MODES = {"strict_real_only", "all_points"}
 SUPPORTED_MODELS = {
     "gru",
     "hcan",
@@ -259,27 +261,36 @@ def _validate_normalization_section(raw: dict[str, Any]) -> NormalizationSection
 
 
 def _validate_fourier_loss_params(raw: dict[str, Any]) -> dict[str, Any]:
-    unknown_fields = sorted(set(raw) - {"mode", "alpha"})
+    unknown_fields = sorted(set(raw) - {"mode", "alpha", "mask_mode"})
     if unknown_fields:
         raise ConfigError(
             "loss term 'fourier_amplitude_correlation' does not support fields: "
             + ", ".join(unknown_fields)
         )
     mode = raw.get("mode")
-    if not isinstance(mode, str) or mode not in {"paper_random", "fal", "fcl"}:
+    if not isinstance(mode, str) or mode not in SUPPORTED_FOURIER_LOSS_MODES:
         raise ConfigError(
             "loss.term.params.mode must be one of ['fal', 'fcl', 'paper_random']."
+        )
+    mask_mode = raw.get("mask_mode", "strict_real_only")
+    if (
+        not isinstance(mask_mode, str)
+        or mask_mode not in SUPPORTED_FOURIER_MASK_MODES
+    ):
+        raise ConfigError(
+            "loss.term.params.mask_mode must be one of "
+            "['all_points', 'strict_real_only']."
         )
     if mode == "paper_random":
         alpha = raw.get("alpha")
         if not isinstance(alpha, (int, float)) or not 0.0 <= float(alpha) <= 1.0:
             raise ConfigError("loss.term.params.alpha must be in [0.0, 1.0].")
-        return {"mode": mode, "alpha": float(alpha)}
+        return {"mode": mode, "alpha": float(alpha), "mask_mode": mask_mode}
     if "alpha" in raw:
         raise ConfigError(
             "loss.term.params.alpha is only valid when mode='paper_random'."
         )
-    return {"mode": mode}
+    return {"mode": mode, "mask_mode": mask_mode}
 
 
 def _validate_loss_term(raw: Any, index: int) -> LossTermSection:
