@@ -18,6 +18,7 @@ def test_load_baseline_config() -> None:
     assert config.model.parameters["hidden_size"] == 64
     assert config.data.input_steps == 24
     assert config.data.forecast_steps == 24
+    assert config.trainer.batch_size == 128
 
 
 def test_load_gru_facl_config() -> None:
@@ -31,6 +32,7 @@ def test_load_gru_facl_config() -> None:
     assert config.loss.terms[1].params["mode"] == "paper_random"
     assert config.loss.terms[1].params["alpha"] == 0.1
     assert config.loss.terms[1].params["mask_mode"] == "strict_real_only"
+    assert config.trainer.batch_size == 128
 
 
 def test_load_gru_15min_config() -> None:
@@ -40,7 +42,7 @@ def test_load_gru_15min_config() -> None:
     assert config.data.target_airports == ["ZGSZ"]
     assert config.data.input_steps == 96
     assert config.data.forecast_steps == 96
-    assert config.trainer.batch_size == 32
+    assert config.trainer.batch_size == 128
 
 
 @pytest.mark.parametrize(
@@ -66,6 +68,31 @@ def test_load_15min_facl_configs_use_all_points_mask_mode(config_path: str) -> N
 
 
 @pytest.mark.parametrize(
+    "config_path",
+    [
+        "config/gru/baseline_hourly_facl.yaml",
+        "config/hcan/baseline_hourly_facl.yaml",
+        "config/patchtst/baseline_hourly_facl.yaml",
+        "config/itransformer/baseline_hourly_facl.yaml",
+        "config/dlinear/baseline_hourly_facl.yaml",
+        "config/tfps/baseline_hourly_facl.yaml",
+        "config/timebridge/baseline_hourly_facl.yaml",
+    ],
+)
+def test_load_hourly_facl_configs_use_strict_real_only_mask_mode(
+    config_path: str,
+) -> None:
+    config = load_config(config_path)
+    fourier_term = next(
+        term
+        for term in config.loss.terms
+        if term.name == "fourier_amplitude_correlation"
+    )
+    assert fourier_term.params["mask_mode"] == "strict_real_only"
+    assert config.trainer.batch_size == 128
+
+
+@pytest.mark.parametrize(
     ("config_path", "model_name", "expected_steps"),
     [
         ("config/gru/baseline_15min_facl.yaml", "gru", 96),
@@ -73,18 +100,24 @@ def test_load_15min_facl_configs_use_all_points_mask_mode(config_path: str) -> N
         ("config/gru/baseline_15min.yaml", "gru", 96),
         ("config/hcan/baseline_15min.yaml", "hcan", 96),
         ("config/hcan/baseline_15min_facl.yaml", "hcan", 96),
+        ("config/hcan/baseline_hourly_facl.yaml", "hcan", 24),
         ("config/hcan/baseline_hourly.yaml", "hcan", 24),
         ("config/hcan/no_hcl_hourly.yaml", "hcan", 24),
         ("config/patchtst/baseline_15min_facl.yaml", "patchtst", 96),
         ("config/patchtst/baseline_15min.yaml", "patchtst", 96),
+        ("config/patchtst/baseline_hourly_facl.yaml", "patchtst", 24),
         ("config/itransformer/baseline_15min_facl.yaml", "itransformer", 96),
         ("config/itransformer/baseline_15min.yaml", "itransformer", 96),
+        ("config/itransformer/baseline_hourly_facl.yaml", "itransformer", 24),
         ("config/dlinear/baseline_15min_facl.yaml", "dlinear", 96),
         ("config/dlinear/baseline_15min.yaml", "dlinear", 96),
+        ("config/dlinear/baseline_hourly_facl.yaml", "dlinear", 24),
         ("config/tfps/baseline_15min_facl.yaml", "tfps", 96),
         ("config/tfps/baseline_15min.yaml", "tfps", 96),
+        ("config/tfps/baseline_hourly_facl.yaml", "tfps", 24),
         ("config/timebridge/baseline_15min_facl.yaml", "timebridge", 96),
         ("config/timebridge/baseline_15min.yaml", "timebridge", 96),
+        ("config/timebridge/baseline_hourly_facl.yaml", "timebridge", 24),
         ("config/patchtst/baseline_hourly.yaml", "patchtst", 24),
         ("config/itransformer/baseline_hourly.yaml", "itransformer", 24),
         ("config/dlinear/baseline_hourly.yaml", "dlinear", 24),
@@ -104,6 +137,7 @@ def test_load_additional_model_configs(
     assert config.model.name == model_name
     assert config.data.input_steps == expected_steps
     assert config.data.forecast_steps == expected_steps
+    assert config.trainer.batch_size == 128
 
 
 def test_config_rejects_non_train_normalization(tmp_path: Path) -> None:

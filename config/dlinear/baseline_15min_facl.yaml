@@ -56,7 +56,7 @@ model:
 
 trainer:
   device: cuda
-  batch_size: 64
+  batch_size: 128
   epochs: 50
   patience: 8
   learning_rate: 0.001

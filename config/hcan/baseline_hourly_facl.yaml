@@ -1,5 +1,5 @@
 experiment:
-  name: patchtst_baseline_hourly
+  name: hcan_baseline_hourly_facl
   seed: 7
 
 runtime:
@@ -37,15 +37,30 @@ normalization:
   fit_split: train
   apply_to_inputs: true
 
+loss:
+  name: composite
+  terms:
+    - name: hcan_auxiliary
+      weight: 1.0
+    - name: fourier_amplitude_correlation
+      weight: 0.2
+      params:
+        mode: paper_random
+        alpha: 0.1
+        mask_mode: strict_real_only
+
 model:
-  name: patchtst
-  d_model: 64
-  num_layers: 2
-  n_heads: 4
-  ff_dim: 128
-  dropout: 0.1
-  patch_len: 6
-  stride: 3
+  name: hcan
+  backbone_hidden_size: 64
+  backbone_num_layers: 1
+  backbone_dropout: 0.0
+  hidden_dim: 32
+  num_coarse: 4
+  num_fine: 8
+  lambda_cls: 1.0
+  lambda_reg: 1.0
+  lambda_acl: 1.0
+  lambda_direct: 1.0
 
 trainer:
   device: cuda
