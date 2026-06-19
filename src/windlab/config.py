@@ -10,7 +10,7 @@ from typing import Any
 
 import yaml
 
-SUPPORTED_SOURCES = {"series", "series_15min", "EC"}
+SUPPORTED_SOURCES = {"series", "series_15min", "series_15min_cubic", "EC"}
 SUPPORTED_NORMALIZATION_METHODS = {"zscore"}
 SUPPORTED_FIT_SPLITS = {"train"}
 SUPPORTED_LOSSES = {"composite"}

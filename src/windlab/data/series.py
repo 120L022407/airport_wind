@@ -106,7 +106,7 @@ def build_series_data(config: ExperimentConfig) -> PreparedSeriesData:
 
     source_root = Path(config.data.root) / config.data.source
     loaded = load_dataset_root(source_root, config.data.source)
-    if config.data.source not in {"series", "series_15min"}:
+    if config.data.source not in {"series", "series_15min", "series_15min_cubic"}:
         raise DatasetLoadError("build_series_data only supports series-like sources.")
 
     airports = loaded.metadata["airports"]
@@ -194,3 +194,5 @@ if "series" not in DATA_BUILDERS.keys():
     DATA_BUILDERS.register("series", build_series_data)
 if "series_15min" not in DATA_BUILDERS.keys():
     DATA_BUILDERS.register("series_15min", build_series_data)
+if "series_15min_cubic" not in DATA_BUILDERS.keys():
+    DATA_BUILDERS.register("series_15min_cubic", build_series_data)

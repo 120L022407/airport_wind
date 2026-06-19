@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from windlab.config import load_config
 from windlab.data.series import build_series_data
@@ -33,19 +34,23 @@ def test_build_windows_keeps_splits_separate(tmp_path: Path) -> None:
     assert np.all(windowed.train.observed_target_mask)
 
 
-def test_build_windows_aligns_original_mask_for_series_15min(tmp_path: Path) -> None:
+@pytest.mark.parametrize("source", ["series_15min", "series_15min_cubic"])
+def test_build_windows_aligns_original_mask_for_series_15min_like(
+    tmp_path: Path,
+    source: str,
+) -> None:
     data_root = create_synthetic_data_root(tmp_path)
-    config_path = tmp_path / "series_15min.yaml"
+    config_path = tmp_path / f"{source}.yaml"
     config_path.write_text(
         f"""
 experiment:
-  name: gru_series_15min
+  name: gru_{source}
   seed: 7
 runtime:
   output_root: outputs
 data:
   root: {data_root}
-  source: series_15min
+  source: {source}
   airports: [ZGSZ, ZGGG, VHHH, VMMC]
   target_airports: [ZGSZ]
   input_variables: [sknt]

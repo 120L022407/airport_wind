@@ -45,6 +45,16 @@ def test_load_gru_15min_config() -> None:
     assert config.trainer.batch_size == 128
 
 
+def test_load_gru_15min_cube_config() -> None:
+    config = load_config("config/gru/baseline_15min_cube.yaml")
+    assert config.data.source == "series_15min_cubic"
+    assert config.data.time_resolution == "15min"
+    assert config.data.target_airports == ["ZGSZ"]
+    assert config.data.input_steps == 96
+    assert config.data.forecast_steps == 96
+    assert config.trainer.batch_size == 128
+
+
 @pytest.mark.parametrize(
     "config_path",
     [
@@ -55,6 +65,13 @@ def test_load_gru_15min_config() -> None:
         "config/dlinear/baseline_15min_facl.yaml",
         "config/tfps/baseline_15min_facl.yaml",
         "config/timebridge/baseline_15min_facl.yaml",
+        "config/gru/baseline_15min_cube_facl.yaml",
+        "config/hcan/baseline_15min_cube_facl.yaml",
+        "config/patchtst/baseline_15min_cube_facl.yaml",
+        "config/itransformer/baseline_15min_cube_facl.yaml",
+        "config/dlinear/baseline_15min_cube_facl.yaml",
+        "config/tfps/baseline_15min_cube_facl.yaml",
+        "config/timebridge/baseline_15min_cube_facl.yaml",
     ],
 )
 def test_load_15min_facl_configs_use_all_points_mask_mode(config_path: str) -> None:
@@ -96,27 +113,41 @@ def test_load_hourly_facl_configs_use_strict_real_only_mask_mode(
     ("config_path", "model_name", "expected_steps"),
     [
         ("config/gru/baseline_15min_facl.yaml", "gru", 96),
+        ("config/gru/baseline_15min_cube_facl.yaml", "gru", 96),
         ("config/gru/baseline_hourly_facl.yaml", "gru", 24),
         ("config/gru/baseline_15min.yaml", "gru", 96),
+        ("config/gru/baseline_15min_cube.yaml", "gru", 96),
         ("config/hcan/baseline_15min.yaml", "hcan", 96),
         ("config/hcan/baseline_15min_facl.yaml", "hcan", 96),
+        ("config/hcan/baseline_15min_cube.yaml", "hcan", 96),
+        ("config/hcan/baseline_15min_cube_facl.yaml", "hcan", 96),
         ("config/hcan/baseline_hourly_facl.yaml", "hcan", 24),
         ("config/hcan/baseline_hourly.yaml", "hcan", 24),
         ("config/hcan/no_hcl_hourly.yaml", "hcan", 24),
         ("config/patchtst/baseline_15min_facl.yaml", "patchtst", 96),
         ("config/patchtst/baseline_15min.yaml", "patchtst", 96),
+        ("config/patchtst/baseline_15min_cube.yaml", "patchtst", 96),
+        ("config/patchtst/baseline_15min_cube_facl.yaml", "patchtst", 96),
         ("config/patchtst/baseline_hourly_facl.yaml", "patchtst", 24),
         ("config/itransformer/baseline_15min_facl.yaml", "itransformer", 96),
         ("config/itransformer/baseline_15min.yaml", "itransformer", 96),
+        ("config/itransformer/baseline_15min_cube.yaml", "itransformer", 96),
+        ("config/itransformer/baseline_15min_cube_facl.yaml", "itransformer", 96),
         ("config/itransformer/baseline_hourly_facl.yaml", "itransformer", 24),
         ("config/dlinear/baseline_15min_facl.yaml", "dlinear", 96),
         ("config/dlinear/baseline_15min.yaml", "dlinear", 96),
+        ("config/dlinear/baseline_15min_cube.yaml", "dlinear", 96),
+        ("config/dlinear/baseline_15min_cube_facl.yaml", "dlinear", 96),
         ("config/dlinear/baseline_hourly_facl.yaml", "dlinear", 24),
         ("config/tfps/baseline_15min_facl.yaml", "tfps", 96),
         ("config/tfps/baseline_15min.yaml", "tfps", 96),
+        ("config/tfps/baseline_15min_cube.yaml", "tfps", 96),
+        ("config/tfps/baseline_15min_cube_facl.yaml", "tfps", 96),
         ("config/tfps/baseline_hourly_facl.yaml", "tfps", 24),
         ("config/timebridge/baseline_15min_facl.yaml", "timebridge", 96),
         ("config/timebridge/baseline_15min.yaml", "timebridge", 96),
+        ("config/timebridge/baseline_15min_cube.yaml", "timebridge", 96),
+        ("config/timebridge/baseline_15min_cube_facl.yaml", "timebridge", 96),
         ("config/timebridge/baseline_hourly_facl.yaml", "timebridge", 24),
         ("config/patchtst/baseline_hourly.yaml", "patchtst", 24),
         ("config/itransformer/baseline_hourly.yaml", "itransformer", 24),

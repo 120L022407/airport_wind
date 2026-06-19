@@ -11,6 +11,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 SERIES_SPLITS = ("train", "val", "test")
+SERIES_WITH_ORIGINAL_MASK = frozenset({"series_15min", "series_15min_cubic"})
 FloatArray = NDArray[np.float64]
 BoolArray = NDArray[np.bool_]
 
@@ -97,7 +98,7 @@ def _validate_series_metadata(
             )
 
     original_masks: dict[str, BoolArray] | None = None
-    if source == "series_15min":
+    if source in SERIES_WITH_ORIGINAL_MASK:
         original_masks = {}
         for split_name, array in splits.items():
             mask = _load_required_bool_array(
@@ -151,7 +152,7 @@ def load_dataset_root(dataset_root: str | Path, source: str) -> LoadedDataset:
         raise DatasetLoadError(f"Dataset root does not exist: {root_path}")
     splits = _load_split_arrays(root_path)
 
-    if source in {"series", "series_15min"}:
+    if source in {"series", "series_15min", "series_15min_cubic"}:
         metadata, original_masks = _validate_series_metadata(root_path, source, splits)
         return LoadedDataset(
             source=source,

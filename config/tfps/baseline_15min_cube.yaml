@@ -1,0 +1,72 @@
+experiment:
+  name: tfps_baseline_15min_cube
+  seed: 7
+
+runtime:
+  output_root: outputs
+
+data:
+  root: ${AIRPORT_WIND_DATA_ROOT:-data}
+  source: series_15min_cubic
+  airports: [ZGSZ, ZGGG, VHHH, VMMC]
+  target_airports: [ZGSZ]
+  input_variables:
+    [
+      sknt,
+      wind_dir_sin,
+      wind_dir_cos,
+      tmpf,
+      alti,
+      dwpf,
+      relh,
+      gust,
+      hour_sin,
+      hour_cos,
+      month_sin,
+      month_cos,
+      day_of_year_norm,
+    ]
+  target_variables: [sknt]
+  time_resolution: 15min
+  input_steps: 96
+  forecast_steps: 96
+
+normalization:
+  enabled: true
+  method: zscore
+  fit_split: train
+  apply_to_inputs: true
+
+model:
+  name: tfps
+  d_model: 64
+  num_layers: 2
+  n_heads: 4
+  ff_dim: 128
+  dropout: 0.1
+  patch_len: 24
+  stride: 12
+  time_num_experts: 4
+  time_top_k: 2
+  frequency_num_experts: 4
+  frequency_top_k: 2
+  expert_hidden_size: 128
+  subspace_eta: 5.0
+  use_time_domain: true
+  use_frequency_domain: true
+  use_pattern_identifier: true
+  use_pattern_experts: true
+  noisy_gating: false
+
+trainer:
+  device: cuda
+  batch_size: 128
+  epochs: 50
+  patience: 8
+  learning_rate: 0.001
+  weight_decay: 0.0
+  min_delta: 0.0
+
+evaluation:
+  metrics: [mae, rmse, bias]
+  real_observation_only: true

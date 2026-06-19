@@ -33,6 +33,10 @@ def create_synthetic_data_root(base_path: Path) -> Path:
     data_root.mkdir(parents=True, exist_ok=True)
     create_series_fixture(data_root / "series", source="series")
     create_series_fixture(data_root / "series_15min", source="series_15min")
+    create_series_fixture(
+        data_root / "series_15min_cubic",
+        source="series_15min_cubic",
+    )
     create_ec_fixture(data_root / "EC")
     return data_root
 
@@ -53,7 +57,7 @@ def create_series_fixture(
             size=(time_length, len(SERIES_AIRPORTS), len(SERIES_VARIABLES)),
         )
         np.save(dataset_root / f"{split_name}.npy", array)
-        if source == "series_15min":
+        if source in {"series_15min", "series_15min_cubic"}:
             mask = np.array(
                 [(index % 2) == 0 for index in range(time_length)],
                 dtype=bool,
@@ -66,7 +70,9 @@ def create_series_fixture(
             "source": source,
             "airports": SERIES_AIRPORTS,
             "variables": SERIES_VARIABLES,
-            "time_resolution": "15min" if source == "series_15min" else "1h",
+            "time_resolution": (
+                "15min" if source in {"series_15min", "series_15min_cubic"} else "1h"
+            ),
             "units": {"sknt": "m/s", "gust": "m/s"},
         },
     )
