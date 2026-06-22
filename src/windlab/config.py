@@ -18,9 +18,11 @@ SUPPORTED_LOSS_TERMS = {
     "mse",
     "hcan_auxiliary",
     "fourier_amplitude_correlation",
+    "patch_wise_structural",
 }
 SUPPORTED_FOURIER_LOSS_MODES = {"paper_random", "fal", "fcl"}
 SUPPORTED_FOURIER_MASK_MODES = {"strict_real_only", "all_points"}
+SUPPORTED_PATCH_WISE_STRUCTURAL_MASK_MODES = {"strict_real_only", "all_points"}
 SUPPORTED_MODELS = {
     "gru",
     "hcan",
@@ -293,6 +295,32 @@ def _validate_fourier_loss_params(raw: dict[str, Any]) -> dict[str, Any]:
     return {"mode": mode, "mask_mode": mask_mode}
 
 
+def _validate_patch_wise_structural_loss_params(raw: dict[str, Any]) -> dict[str, Any]:
+    unknown_fields = sorted(set(raw) - {"patch_len_threshold", "mask_mode"})
+    if unknown_fields:
+        raise ConfigError(
+            "loss term 'patch_wise_structural' does not support fields: "
+            + ", ".join(unknown_fields)
+        )
+    patch_len_threshold = _require_positive_int(
+        raw.get("patch_len_threshold"),
+        "loss.term.params.patch_len_threshold",
+    )
+    mask_mode = raw.get("mask_mode")
+    if (
+        not isinstance(mask_mode, str)
+        or mask_mode not in SUPPORTED_PATCH_WISE_STRUCTURAL_MASK_MODES
+    ):
+        raise ConfigError(
+            "loss.term.params.mask_mode must be one of "
+            "['all_points', 'strict_real_only']."
+        )
+    return {
+        "patch_len_threshold": patch_len_threshold,
+        "mask_mode": mask_mode,
+    }
+
+
 def _validate_loss_term(raw: Any, index: int) -> LossTermSection:
     field_name = f"loss.terms[{index}]"
     mapping = _require_mapping(raw, field_name)
@@ -313,10 +341,16 @@ def _validate_loss_term(raw: Any, index: int) -> LossTermSection:
         if params:
             raise ConfigError(f"{field_name}.params must be empty for loss {name!r}.")
         return LossTermSection(name=name, weight=weight, params={})
+    if name == "fourier_amplitude_correlation":
+        validated_params = _validate_fourier_loss_params(params)
+    elif name == "patch_wise_structural":
+        validated_params = _validate_patch_wise_structural_loss_params(params)
+    else:
+        raise AssertionError(f"Unhandled loss term validator for {name!r}.")
     return LossTermSection(
         name=name,
         weight=weight,
-        params=_validate_fourier_loss_params(params),
+        params=validated_params,
     )
 
 

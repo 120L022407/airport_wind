@@ -21,6 +21,9 @@ ModelOutput = Mapping[str, Any] | torch.Tensor
 LossFn = Callable[[ModelOutput, torch.Tensor, torch.Tensor | None], torch.Tensor]
 LossTermBuilder = Callable[[dict[str, Any], "LossBuildContext"], LossFn]
 SUPPORTED_FOURIER_MASK_MODES = frozenset({"strict_real_only", "all_points"})
+SUPPORTED_PATCH_WISE_STRUCTURAL_MASK_MODES = frozenset(
+    {"strict_real_only", "all_points"}
+)
 
 
 class LossTermConfigProtocol(Protocol):
@@ -100,6 +103,42 @@ def _default_loss_config() -> _InlineLossConfig:
         name="composite",
         terms=[_InlineLossTermConfig(name="mse", weight=1.0, params={})],
     )
+
+
+def _select_active_forecast_sequences(
+    prediction: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor | None,
+    *,
+    mask_mode: str,
+    loss_name: str,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if prediction.shape != target.shape:
+        raise ValueError(
+            "Prediction shape "
+            f"{prediction.shape} does not match target shape {target.shape}."
+        )
+    if prediction.ndim != 4:
+        raise ValueError(
+            f"{loss_name} expects tensors shaped "
+            "[batch, horizon, airport, target]."
+        )
+    if mask is not None and mask.shape != target.shape:
+        raise ValueError(
+            "Mask shape "
+            f"{mask.shape} does not match target shape {target.shape}."
+        )
+
+    prediction_sequences = prediction.permute(0, 2, 3, 1)
+    target_sequences = target.permute(0, 2, 3, 1)
+    if mask is None or mask_mode == "all_points":
+        sequence_mask = torch.ones_like(
+            prediction_sequences[..., 0],
+            dtype=torch.bool,
+        )
+    else:
+        sequence_mask = mask.bool().permute(0, 2, 3, 1).all(dim=-1)
+    return prediction_sequences[sequence_mask], target_sequences[sequence_mask]
 
 
 def _symmetric_kl_divergence(p: torch.Tensor, q: torch.Tensor) -> torch.Tensor:
@@ -485,31 +524,13 @@ class FourierAmplitudeCorrelationLossTerm:
         target: torch.Tensor,
         mask: torch.Tensor | None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        if prediction.shape != target.shape:
-            raise ValueError(
-                "Prediction shape "
-                f"{prediction.shape} does not match target shape {target.shape}."
-            )
-        if prediction.ndim != 4:
-            raise ValueError(
-                "FourierAmplitudeCorrelationLossTerm expects tensors shaped "
-                "[batch, horizon, airport, target]."
-            )
-        prediction_sequences = prediction.permute(0, 2, 3, 1)
-        target_sequences = target.permute(0, 2, 3, 1)
-        if mask is not None and mask.shape != target.shape:
-            raise ValueError(
-                "Mask shape "
-                f"{mask.shape} does not match target shape {target.shape}."
-            )
-        if mask is None or self.mask_mode == "all_points":
-            sequence_mask = torch.ones_like(
-                prediction_sequences[..., 0],
-                dtype=torch.bool,
-            )
-        else:
-            sequence_mask = mask.bool().permute(0, 2, 3, 1).all(dim=-1)
-        return prediction_sequences[sequence_mask], target_sequences[sequence_mask]
+        return _select_active_forecast_sequences(
+            prediction,
+            target,
+            mask,
+            mask_mode=self.mask_mode,
+            loss_name="FourierAmplitudeCorrelationLossTerm",
+        )
 
     def _current_probability(self, step: int) -> float:
         alpha = 0.0 if self.alpha is None else self.alpha
@@ -536,6 +557,184 @@ class FourierAmplitudeCorrelationLossTerm:
         if bool((denominator <= epsilon).detach().cpu().item()):
             return fft_prediction.real.sum() * 0.0
         return 1.0 - numerator / denominator.clamp_min(epsilon)
+
+
+class PatchWiseStructuralLossTerm:
+    """Patch-wise Structural Loss adapted to the forecast output contract."""
+
+    def __init__(
+        self,
+        *,
+        patch_len_threshold: int,
+        mask_mode: str,
+    ) -> None:
+        if patch_len_threshold <= 0:
+            raise ValueError("patch_len_threshold must be positive.")
+        if mask_mode not in SUPPORTED_PATCH_WISE_STRUCTURAL_MASK_MODES:
+            raise ValueError(
+                "mask_mode must be 'strict_real_only' or 'all_points'."
+            )
+        self.patch_len_threshold = patch_len_threshold
+        self.mask_mode = mask_mode
+        self.kl_loss = torch.nn.KLDivLoss(reduction="none")
+
+    def __call__(
+        self,
+        output: ModelOutput,
+        target: torch.Tensor,
+        mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        prediction, _ = _extract_prediction_and_aux(output)
+        if not torch.is_grad_enabled():
+            return prediction.sum() * 0.0
+
+        active_prediction, active_target = _select_active_forecast_sequences(
+            prediction,
+            target,
+            mask,
+            mask_mode=self.mask_mode,
+            loss_name="PatchWiseStructuralLossTerm",
+        )
+        if active_prediction.numel() == 0:
+            return prediction.sum() * 0.0
+
+        true_patches, pred_patches = self._fourier_based_adaptive_patching(
+            active_target,
+            active_prediction,
+        )
+        corr_loss, var_loss, mean_loss = self._patch_wise_structural_loss(
+            true_patches,
+            pred_patches,
+        )
+        alpha, beta, gamma = self._gradient_based_dynamic_weighting(
+            active_target,
+            active_prediction,
+            corr_loss,
+            var_loss,
+            mean_loss,
+        )
+        return alpha * corr_loss + beta * var_loss + gamma * mean_loss
+
+    def _create_patches(
+        self,
+        values: torch.Tensor,
+        *,
+        patch_len: int,
+        stride: int,
+    ) -> torch.Tensor:
+        if values.ndim != 2:
+            raise ValueError("PatchWiseStructuralLossTerm expects [sequence, horizon].")
+        unfolded = values.unsqueeze(1).unfold(2, patch_len, stride)
+        return unfolded.reshape(values.shape[0], 1, unfolded.shape[2], patch_len)
+
+    def _fourier_based_adaptive_patching(
+        self,
+        true: torch.Tensor,
+        pred: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        horizon = true.shape[-1]
+        true_fft = torch.fft.rfft(true.unsqueeze(-1), dim=1)
+        frequency_list = torch.abs(true_fft).mean(0).mean(-1)
+        if frequency_list.numel() == 0:
+            raise ValueError("PatchWiseStructuralLossTerm received an empty horizon.")
+        frequency_list = frequency_list.clone()
+        frequency_list[:1] = 0.0
+        top_index = int(torch.argmax(frequency_list).detach().cpu().item())
+        if top_index <= 0:
+            candidate_patch_len = min(self.patch_len_threshold, max(2, horizon // 2))
+        else:
+            period = max(2, horizon // top_index)
+            candidate_patch_len = min(self.patch_len_threshold, period // 2)
+        patch_len = min(horizon, max(2, candidate_patch_len))
+        stride = max(1, patch_len // 2)
+        return (
+            self._create_patches(true, patch_len=patch_len, stride=stride),
+            self._create_patches(pred, patch_len=patch_len, stride=stride),
+        )
+
+    def _patch_wise_structural_loss(
+        self,
+        true_patch: torch.Tensor,
+        pred_patch: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        epsilon = torch.finfo(true_patch.dtype).eps
+        true_patch_mean = torch.mean(true_patch, dim=-1, keepdim=True)
+        pred_patch_mean = torch.mean(pred_patch, dim=-1, keepdim=True)
+
+        true_patch_var = torch.var(true_patch, dim=-1, keepdim=True, unbiased=False)
+        pred_patch_var = torch.var(pred_patch, dim=-1, keepdim=True, unbiased=False)
+        true_patch_std = torch.sqrt(true_patch_var.clamp_min(epsilon))
+        pred_patch_std = torch.sqrt(pred_patch_var.clamp_min(epsilon))
+
+        true_pred_patch_cov = torch.mean(
+            (true_patch - true_patch_mean) * (pred_patch - pred_patch_mean),
+            dim=-1,
+            keepdim=True,
+        )
+        patch_linear_corr = (true_pred_patch_cov + 1e-5) / (
+            true_patch_std * pred_patch_std + 1e-5
+        )
+        linear_corr_loss = (1.0 - patch_linear_corr).mean()
+
+        true_patch_softmax = torch.softmax(true_patch, dim=-1)
+        pred_patch_log_softmax = torch.log_softmax(pred_patch, dim=-1)
+        var_loss = self.kl_loss(pred_patch_log_softmax, true_patch_softmax).sum(
+            dim=-1
+        ).mean()
+        mean_loss = torch.abs(true_patch_mean - pred_patch_mean).mean()
+        return linear_corr_loss, var_loss, mean_loss
+
+    def _gradient_based_dynamic_weighting(
+        self,
+        true: torch.Tensor,
+        pred: torch.Tensor,
+        corr_loss: torch.Tensor,
+        var_loss: torch.Tensor,
+        mean_loss: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        epsilon = torch.finfo(pred.dtype).eps
+        true_series = true.unsqueeze(1)
+        pred_series = pred.unsqueeze(1)
+        true_mean = torch.mean(true_series, dim=-1, keepdim=True)
+        pred_mean = torch.mean(pred_series, dim=-1, keepdim=True)
+        true_var = torch.var(true_series, dim=-1, keepdim=True, unbiased=False)
+        pred_var = torch.var(pred_series, dim=-1, keepdim=True, unbiased=False)
+        true_std = torch.sqrt(true_var.clamp_min(epsilon))
+        pred_std = torch.sqrt(pred_var.clamp_min(epsilon))
+        true_pred_cov = torch.mean(
+            (true_series - true_mean) * (pred_series - pred_mean),
+            dim=-1,
+            keepdim=True,
+        )
+        linear_sim = (true_pred_cov + 1e-5) / (true_std * pred_std + 1e-5)
+        linear_sim = (1.0 + linear_sim) * 0.5
+        var_sim = (2 * true_std * pred_std + 1e-5) / (true_var + pred_var + 1e-5)
+
+        corr_gradient = torch.autograd.grad(
+            corr_loss,
+            pred,
+            retain_graph=True,
+            create_graph=False,
+        )[0]
+        var_gradient = torch.autograd.grad(
+            var_loss,
+            pred,
+            retain_graph=True,
+            create_graph=False,
+        )[0]
+        mean_gradient = torch.autograd.grad(
+            mean_loss,
+            pred,
+            retain_graph=True,
+            create_graph=False,
+        )[0]
+        gradient_avg = (corr_gradient + var_gradient + mean_gradient) / 3.0
+        gradient_avg_norm = gradient_avg.norm().detach().clamp_min(epsilon)
+        alpha = gradient_avg_norm / corr_gradient.norm().detach().clamp_min(epsilon)
+        beta = gradient_avg_norm / var_gradient.norm().detach().clamp_min(epsilon)
+        gamma = gradient_avg_norm / mean_gradient.norm().detach().clamp_min(epsilon)
+        gamma = gamma * torch.mean(linear_sim * var_sim).detach()
+        return alpha, beta, gamma
 
 
 def _build_mse_term(
@@ -584,6 +783,25 @@ def _build_fourier_amplitude_correlation_term(
     )
 
 
+def _build_patch_wise_structural_term(
+    params: dict[str, Any],
+    context: LossBuildContext,
+) -> LossFn:
+    _ = context
+    patch_len_threshold = params.get("patch_len_threshold")
+    mask_mode = params.get("mask_mode")
+    if not isinstance(patch_len_threshold, int):
+        raise ValueError(
+            "patch_wise_structural patch_len_threshold must be an integer."
+        )
+    if not isinstance(mask_mode, str):
+        raise ValueError("patch_wise_structural mask_mode must be a string.")
+    return PatchWiseStructuralLossTerm(
+        patch_len_threshold=patch_len_threshold,
+        mask_mode=mask_mode,
+    )
+
+
 def build_forecast_loss(
     loss_config: LossConfigProtocol | None = None,
     *,
@@ -619,4 +837,9 @@ if "fourier_amplitude_correlation" not in LOSSES.keys():
     LOSSES.register(
         "fourier_amplitude_correlation",
         cast(Any, _build_fourier_amplitude_correlation_term),
+    )
+if "patch_wise_structural" not in LOSSES.keys():
+    LOSSES.register(
+        "patch_wise_structural",
+        cast(Any, _build_patch_wise_structural_term),
     )

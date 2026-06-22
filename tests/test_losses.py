@@ -201,6 +201,156 @@ def test_fourier_loss_sparse_15min_mask_is_not_zero_with_all_points() -> None:
     assert prediction.grad is not None
 
 
+def test_patch_wise_structural_loss_forward_backward_shape() -> None:
+    prediction = torch.randn(2, 24, 1, 1, requires_grad=True)
+    target = torch.randn(2, 24, 1, 1)
+    mask = torch.ones_like(target, dtype=torch.bool)
+    loss_fn = build_forecast_loss(
+        _loss_config(
+            {
+                "name": "patch_wise_structural",
+                "weight": 1.0,
+                "params": {
+                    "patch_len_threshold": 24,
+                    "mask_mode": "strict_real_only",
+                },
+            }
+        ),
+        total_train_steps=4,
+    )
+
+    loss = loss_fn({"prediction": prediction}, target, mask)
+
+    assert loss.ndim == 0
+    assert torch.isfinite(loss)
+    cast(Any, loss).backward()
+    assert prediction.grad is not None
+
+
+def test_patch_wise_structural_loss_supports_batch_size_one() -> None:
+    prediction = torch.randn(1, 24, 1, 1, requires_grad=True)
+    target = torch.randn(1, 24, 1, 1)
+    mask = torch.ones_like(target, dtype=torch.bool)
+    loss_fn = build_forecast_loss(
+        _loss_config(
+            {
+                "name": "patch_wise_structural",
+                "weight": 1.0,
+                "params": {
+                    "patch_len_threshold": 24,
+                    "mask_mode": "strict_real_only",
+                },
+            }
+        ),
+        total_train_steps=4,
+    )
+
+    loss = loss_fn({"prediction": prediction}, target, mask)
+
+    assert torch.isfinite(loss)
+    cast(Any, loss).backward()
+    assert prediction.grad is not None
+
+
+def test_patch_wise_structural_loss_sparse_15min_mask_is_not_zero_with_all_points() -> (
+    None
+):
+    prediction = torch.zeros(1, 96, 1, 1, dtype=torch.float32, requires_grad=True)
+    target = torch.linspace(0.0, 1.0, steps=96, dtype=torch.float32).reshape(
+        1, 96, 1, 1
+    )
+    mask = torch.zeros_like(target, dtype=torch.bool)
+    mask[:, ::4, :, :] = True
+
+    strict_loss_fn = build_forecast_loss(
+        _loss_config(
+            {
+                "name": "patch_wise_structural",
+                "weight": 1.0,
+                "params": {
+                    "patch_len_threshold": 24,
+                    "mask_mode": "strict_real_only",
+                },
+            }
+        ),
+        total_train_steps=4,
+    )
+    all_points_loss_fn = build_forecast_loss(
+        _loss_config(
+            {
+                "name": "patch_wise_structural",
+                "weight": 1.0,
+                "params": {
+                    "patch_len_threshold": 24,
+                    "mask_mode": "all_points",
+                },
+            }
+        ),
+        total_train_steps=4,
+    )
+
+    strict_loss = strict_loss_fn({"prediction": prediction}, target, mask)
+    all_points_loss = all_points_loss_fn({"prediction": prediction}, target, mask)
+
+    assert strict_loss.item() == pytest.approx(0.0)
+    assert all_points_loss.item() > 0.0
+    cast(Any, all_points_loss).backward()
+    assert prediction.grad is not None
+
+
+def test_patch_wise_structural_loss_returns_zero_without_gradients() -> None:
+    prediction = torch.randn(2, 24, 1, 1)
+    target = torch.randn(2, 24, 1, 1)
+    mask = torch.ones_like(target, dtype=torch.bool)
+    loss_fn = build_forecast_loss(
+        _loss_config(
+            {
+                "name": "patch_wise_structural",
+                "weight": 1.0,
+                "params": {
+                    "patch_len_threshold": 24,
+                    "mask_mode": "strict_real_only",
+                },
+            }
+        ),
+        total_train_steps=4,
+    )
+
+    with torch.no_grad():
+        loss = loss_fn({"prediction": prediction}, target, mask)
+
+    assert loss.item() == pytest.approx(0.0)
+
+
+def test_patch_wise_structural_loss_handles_short_high_frequency_sequences() -> None:
+    pattern = torch.tensor([1.0, -1.0] * 12, dtype=torch.float32).reshape(1, 24, 1, 1)
+    prediction = pattern.clone().requires_grad_(True)
+    target = (-pattern).clone()
+    loss_fn = build_forecast_loss(
+        _loss_config(
+            {
+                "name": "patch_wise_structural",
+                "weight": 1.0,
+                "params": {
+                    "patch_len_threshold": 24,
+                    "mask_mode": "strict_real_only",
+                },
+            }
+        ),
+        total_train_steps=4,
+    )
+
+    loss = loss_fn(
+        {"prediction": prediction},
+        target,
+        torch.ones_like(target, dtype=torch.bool),
+    )
+
+    assert torch.isfinite(loss)
+    cast(Any, loss).backward()
+    assert prediction.grad is not None
+
+
 def test_composite_loss_combines_mse_and_fourier_terms() -> None:
     prediction = torch.randn(2, 24, 1, 1, requires_grad=True)
     target = torch.randn(2, 24, 1, 1)
@@ -212,6 +362,32 @@ def test_composite_loss_combines_mse_and_fourier_terms() -> None:
                 "name": "fourier_amplitude_correlation",
                 "weight": 0.2,
                 "params": {"mode": "fal"},
+            },
+        ),
+        total_train_steps=12,
+    )
+
+    loss = loss_fn({"prediction": prediction}, target, mask)
+
+    assert torch.isfinite(loss)
+    cast(Any, loss).backward()
+    assert prediction.grad is not None
+
+
+def test_composite_loss_combines_mse_and_patch_wise_structural_terms() -> None:
+    prediction = torch.randn(2, 24, 1, 1, requires_grad=True)
+    target = torch.randn(2, 24, 1, 1)
+    mask = torch.ones_like(target, dtype=torch.bool)
+    loss_fn = build_forecast_loss(
+        _loss_config(
+            {"name": "mse", "weight": 1.0},
+            {
+                "name": "patch_wise_structural",
+                "weight": 3.0,
+                "params": {
+                    "patch_len_threshold": 24,
+                    "mask_mode": "strict_real_only",
+                },
             },
         ),
         total_train_steps=12,
@@ -244,6 +420,36 @@ def test_build_forecast_loss_rejects_invalid_fourier_params() -> None:
                     "name": "fourier_amplitude_correlation",
                     "weight": 1.0,
                     "params": {"mode": "fal", "mask_mode": "invalid"},
+                }
+            ),
+            total_train_steps=6,
+        )
+
+    with pytest.raises(ValueError, match="patch_len_threshold"):
+        build_forecast_loss(
+            _loss_config(
+                {
+                    "name": "patch_wise_structural",
+                    "weight": 1.0,
+                    "params": {
+                        "patch_len_threshold": "24",
+                        "mask_mode": "strict_real_only",
+                    },
+                }
+            ),
+            total_train_steps=6,
+        )
+
+    with pytest.raises(ValueError, match="mask_mode"):
+        build_forecast_loss(
+            _loss_config(
+                {
+                    "name": "patch_wise_structural",
+                    "weight": 1.0,
+                    "params": {
+                        "patch_len_threshold": 24,
+                        "mask_mode": "invalid",
+                    },
                 }
             ),
             total_train_steps=6,

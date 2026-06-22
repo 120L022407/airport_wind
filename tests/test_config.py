@@ -45,6 +45,18 @@ def test_load_gru_15min_config() -> None:
     assert config.trainer.batch_size == 128
 
 
+def test_load_gru_psloss_config() -> None:
+    config = load_config("config/gru/baseline_15min_psloss.yaml")
+    assert config.model.name == "gru"
+    assert [term.name for term in config.loss.terms] == [
+        "mse",
+        "patch_wise_structural",
+    ]
+    assert config.loss.terms[1].weight == 3.0
+    assert config.loss.terms[1].params["patch_len_threshold"] == 24
+    assert config.loss.terms[1].params["mask_mode"] == "all_points"
+
+
 def test_load_gru_15min_cube_config() -> None:
     config = load_config("config/gru/baseline_15min_cube.yaml")
     assert config.data.source == "series_15min_cubic"
@@ -87,6 +99,54 @@ def test_load_15min_facl_configs_use_all_points_mask_mode(config_path: str) -> N
 @pytest.mark.parametrize(
     "config_path",
     [
+        "config/gru/baseline_15min_psloss.yaml",
+        "config/patchtst/baseline_15min_psloss.yaml",
+        "config/itransformer/baseline_15min_psloss.yaml",
+        "config/dlinear/baseline_15min_psloss.yaml",
+        "config/tfps/baseline_15min_psloss.yaml",
+        "config/timebridge/baseline_15min_psloss.yaml",
+        "config/hcan/baseline_15min_psloss.yaml",
+    ],
+)
+def test_load_15min_psloss_configs_use_all_points_mask_mode(
+    config_path: str,
+) -> None:
+    config = load_config(config_path)
+    ps_term = next(
+        term for term in config.loss.terms if term.name == "patch_wise_structural"
+    )
+    assert ps_term.params["patch_len_threshold"] == 24
+    assert ps_term.params["mask_mode"] == "all_points"
+    assert config.trainer.batch_size == 128
+
+
+@pytest.mark.parametrize(
+    "config_path",
+    [
+        "config/gru/baseline_hourly_psloss.yaml",
+        "config/patchtst/baseline_hourly_psloss.yaml",
+        "config/itransformer/baseline_hourly_psloss.yaml",
+        "config/dlinear/baseline_hourly_psloss.yaml",
+        "config/tfps/baseline_hourly_psloss.yaml",
+        "config/timebridge/baseline_hourly_psloss.yaml",
+        "config/hcan/baseline_hourly_psloss.yaml",
+    ],
+)
+def test_load_hourly_psloss_configs_use_strict_real_only_mask_mode(
+    config_path: str,
+) -> None:
+    config = load_config(config_path)
+    ps_term = next(
+        term for term in config.loss.terms if term.name == "patch_wise_structural"
+    )
+    assert ps_term.params["patch_len_threshold"] == 24
+    assert ps_term.params["mask_mode"] == "strict_real_only"
+    assert config.trainer.batch_size == 128
+
+
+@pytest.mark.parametrize(
+    "config_path",
+    [
         "config/gru/baseline_hourly_facl.yaml",
         "config/hcan/baseline_hourly_facl.yaml",
         "config/patchtst/baseline_hourly_facl.yaml",
@@ -113,41 +173,55 @@ def test_load_hourly_facl_configs_use_strict_real_only_mask_mode(
     ("config_path", "model_name", "expected_steps"),
     [
         ("config/gru/baseline_15min_facl.yaml", "gru", 96),
+        ("config/gru/baseline_15min_psloss.yaml", "gru", 96),
+        ("config/gru/baseline_hourly_psloss.yaml", "gru", 24),
         ("config/gru/baseline_15min_cube_facl.yaml", "gru", 96),
         ("config/gru/baseline_hourly_facl.yaml", "gru", 24),
         ("config/gru/baseline_15min.yaml", "gru", 96),
         ("config/gru/baseline_15min_cube.yaml", "gru", 96),
         ("config/hcan/baseline_15min.yaml", "hcan", 96),
         ("config/hcan/baseline_15min_facl.yaml", "hcan", 96),
+        ("config/hcan/baseline_15min_psloss.yaml", "hcan", 96),
         ("config/hcan/baseline_15min_cube.yaml", "hcan", 96),
         ("config/hcan/baseline_15min_cube_facl.yaml", "hcan", 96),
+        ("config/hcan/baseline_hourly_psloss.yaml", "hcan", 24),
         ("config/hcan/baseline_hourly_facl.yaml", "hcan", 24),
         ("config/hcan/baseline_hourly.yaml", "hcan", 24),
         ("config/hcan/no_hcl_hourly.yaml", "hcan", 24),
         ("config/patchtst/baseline_15min_facl.yaml", "patchtst", 96),
+        ("config/patchtst/baseline_15min_psloss.yaml", "patchtst", 96),
         ("config/patchtst/baseline_15min.yaml", "patchtst", 96),
         ("config/patchtst/baseline_15min_cube.yaml", "patchtst", 96),
         ("config/patchtst/baseline_15min_cube_facl.yaml", "patchtst", 96),
+        ("config/patchtst/baseline_hourly_psloss.yaml", "patchtst", 24),
         ("config/patchtst/baseline_hourly_facl.yaml", "patchtst", 24),
         ("config/itransformer/baseline_15min_facl.yaml", "itransformer", 96),
+        ("config/itransformer/baseline_15min_psloss.yaml", "itransformer", 96),
         ("config/itransformer/baseline_15min.yaml", "itransformer", 96),
         ("config/itransformer/baseline_15min_cube.yaml", "itransformer", 96),
         ("config/itransformer/baseline_15min_cube_facl.yaml", "itransformer", 96),
+        ("config/itransformer/baseline_hourly_psloss.yaml", "itransformer", 24),
         ("config/itransformer/baseline_hourly_facl.yaml", "itransformer", 24),
         ("config/dlinear/baseline_15min_facl.yaml", "dlinear", 96),
+        ("config/dlinear/baseline_15min_psloss.yaml", "dlinear", 96),
         ("config/dlinear/baseline_15min.yaml", "dlinear", 96),
         ("config/dlinear/baseline_15min_cube.yaml", "dlinear", 96),
         ("config/dlinear/baseline_15min_cube_facl.yaml", "dlinear", 96),
+        ("config/dlinear/baseline_hourly_psloss.yaml", "dlinear", 24),
         ("config/dlinear/baseline_hourly_facl.yaml", "dlinear", 24),
         ("config/tfps/baseline_15min_facl.yaml", "tfps", 96),
+        ("config/tfps/baseline_15min_psloss.yaml", "tfps", 96),
         ("config/tfps/baseline_15min.yaml", "tfps", 96),
         ("config/tfps/baseline_15min_cube.yaml", "tfps", 96),
         ("config/tfps/baseline_15min_cube_facl.yaml", "tfps", 96),
+        ("config/tfps/baseline_hourly_psloss.yaml", "tfps", 24),
         ("config/tfps/baseline_hourly_facl.yaml", "tfps", 24),
         ("config/timebridge/baseline_15min_facl.yaml", "timebridge", 96),
+        ("config/timebridge/baseline_15min_psloss.yaml", "timebridge", 96),
         ("config/timebridge/baseline_15min.yaml", "timebridge", 96),
         ("config/timebridge/baseline_15min_cube.yaml", "timebridge", 96),
         ("config/timebridge/baseline_15min_cube_facl.yaml", "timebridge", 96),
+        ("config/timebridge/baseline_hourly_psloss.yaml", "timebridge", 24),
         ("config/timebridge/baseline_hourly_facl.yaml", "timebridge", 24),
         ("config/patchtst/baseline_hourly.yaml", "patchtst", 24),
         ("config/itransformer/baseline_hourly.yaml", "itransformer", 24),
@@ -477,6 +551,34 @@ model:
         encoding="utf-8",
     )
     with pytest.raises(ConfigError, match="mask_mode"):
+        load_config(config_path)
+
+
+def test_config_rejects_invalid_ps_loss_params(tmp_path: Path) -> None:
+    config_path = tmp_path / "invalid_ps_loss.yaml"
+    config_path.write_text(
+        _valid_config_text(
+            """
+loss:
+  name: composite
+  terms:
+    - name: mse
+      weight: 1.0
+    - name: patch_wise_structural
+      weight: 3.0
+      params:
+        patch_len_threshold: 0
+        mask_mode: invalid
+model:
+  name: gru
+  hidden_size: 16
+  num_layers: 1
+  dropout: 0.0
+"""
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="patch_len_threshold|mask_mode"):
         load_config(config_path)
 
 

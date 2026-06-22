@@ -1,0 +1,70 @@
+experiment:
+  name: itransformer_baseline_hourly_psloss
+  seed: 7
+
+runtime:
+  output_root: outputs
+
+data:
+  root: ${AIRPORT_WIND_DATA_ROOT:-data}
+  source: series
+  airports: [ZGSZ, ZGGG, VHHH, VMMC]
+  target_airports: [ZGSZ]
+  input_variables:
+    [
+      sknt,
+      wind_dir_sin,
+      wind_dir_cos,
+      tmpf,
+      alti,
+      dwpf,
+      relh,
+      gust,
+      hour_sin,
+      hour_cos,
+      month_sin,
+      month_cos,
+      day_of_year_norm,
+    ]
+  target_variables: [sknt]
+  time_resolution: 1h
+  input_steps: 24
+  forecast_steps: 24
+
+normalization:
+  enabled: true
+  method: zscore
+  fit_split: train
+  apply_to_inputs: true
+
+loss:
+  name: composite
+  terms:
+    - name: mse
+      weight: 1.0
+    - name: patch_wise_structural
+      weight: 3.0
+      params:
+        patch_len_threshold: 24
+        mask_mode: strict_real_only
+
+model:
+  name: itransformer
+  d_model: 64
+  num_layers: 2
+  n_heads: 4
+  ff_dim: 128
+  dropout: 0.1
+
+trainer:
+  device: cuda
+  batch_size: 128
+  epochs: 50
+  patience: 8
+  learning_rate: 0.001
+  weight_decay: 0.0
+  min_delta: 0.0
+
+evaluation:
+  metrics: [mae, rmse, bias]
+  real_observation_only: true

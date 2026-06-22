@@ -170,6 +170,77 @@ evaluation:
     assert "fourier_amplitude_correlation" in saved_config
 
 
+def test_gru_composite_patch_wise_structural_loss_smoke(tmp_path: Path) -> None:
+    data_root = create_synthetic_data_root(tmp_path)
+    output_root = tmp_path / "outputs"
+    config_path = tmp_path / "smoke_gru_psloss.yaml"
+    config_path.write_text(
+        f"""
+experiment:
+  name: smoke_gru_psloss
+  seed: 14
+runtime:
+  output_root: {output_root}
+data:
+  root: {data_root}
+  source: series
+  airports: [ZGSZ, ZGGG, VHHH, VMMC]
+  target_airports: [ZGSZ]
+  input_variables: [sknt]
+  target_variables: [sknt]
+  time_resolution: 1h
+  input_steps: 24
+  forecast_steps: 24
+normalization:
+  enabled: true
+  method: zscore
+  fit_split: train
+  apply_to_inputs: true
+loss:
+  name: composite
+  terms:
+    - name: mse
+      weight: 1.0
+    - name: patch_wise_structural
+      weight: 3.0
+      params:
+        patch_len_threshold: 24
+        mask_mode: strict_real_only
+model:
+  name: gru
+  hidden_size: 8
+  num_layers: 1
+  dropout: 0.0
+trainer:
+  device: cpu
+  batch_size: 4
+  epochs: 2
+  patience: 2
+  learning_rate: 0.001
+  weight_decay: 0.0
+  min_delta: 0.0
+evaluation:
+  metrics: [mae, rmse, bias]
+  real_observation_only: true
+""",
+        encoding="utf-8",
+    )
+
+    train_result = subprocess.run(
+        [sys.executable, "scripts/train.py", "--config", str(config_path)],
+        cwd=Path.cwd(),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    run_dir = Path(train_result.stdout.strip())
+    assert (run_dir / "best_checkpoint.pt").is_file()
+    assert (run_dir / "resolved_config.yaml").is_file()
+
+    saved_config = (run_dir / "resolved_config.yaml").read_text(encoding="utf-8")
+    assert "patch_wise_structural" in saved_config
+
+
 def test_tfps_training_and_evaluation_smoke(tmp_path: Path) -> None:
     data_root = create_synthetic_data_root(tmp_path)
     output_root = tmp_path / "outputs"
